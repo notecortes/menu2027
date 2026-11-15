@@ -18,6 +18,7 @@ import {
   formatGastronomicAmount,
   sortRecipesList,
   evaluateWeeklyPlan,
+  calculateClinicalTargets,
   getCompatibleAlternatives,
   generateSeasonalWeeklyPlan,
   aggregateShoppingList,
@@ -32,8 +33,14 @@ const STORAGE_KEYS = {
   PREFS: 'meddiet_user_prefs_v2',
   FAVORITES: 'meddiet_favorites_v2',
   SAVED_MENUS: 'meddiet_saved_menus_v1',
-  CHECKED_ITEMS: 'meddiet_checked_shopping_v1'
+  CHECKED_ITEMS: 'meddiet_checked_shopping_v1',
+  LOCKED_SLOTS: 'meddiet_locked_slots_v1',
+  CUSTOM_SHOPPING: 'meddiet_custom_shopping_v1',
+  CLINICAL_PROFILE: 'meddiet_clinical_profile_v1'
 };
+
+// Ingredientes básicos de despensa que suelen tenerse en casa
+const PANTRY_BASIC_INGREDIENT_IDS = new Set([9, 11, 46, 47]);
 
 const state = {
   theme: localStorage.getItem(STORAGE_KEYS.THEME) || 'light',
@@ -49,6 +56,10 @@ const state = {
   activeAlternativeSlot: null, // { day, mealType }
   preferences: loadStoredPreferences(),
   favorites: loadStoredFavorites(),
+  lockedSlots: loadStoredLockedSlots(),
+  customShoppingItems: loadStoredCustomShopping(),
+  hidePantryBasics: false,
+  clinicalProfile: loadStoredClinicalProfile(),
   planMap: null,
   savedMenus: loadStoredSavedMenus(),
   checkedIngredients: loadCheckedIngredients(),
@@ -192,35 +203,91 @@ function saveCheckedIngredients() {
   localStorage.setItem(STORAGE_KEYS.CHECKED_ITEMS, JSON.stringify(state.checkedIngredients));
 }
 
-/**
- * Resuelve la ruta relativa adecuada hacia la API según la ubicación actual en el navegador.
- * Garantiza compatibilidad tanto si la aplicación se carga desde la raíz como desde un subdirectorio.
- *
- * @param {string} endpoint - Ruta relativa del endpoint (ej. 'api/get_menu.php')
- * @returns {string} Endpoint con prefijo ajustado si estamos en /public/
- */
-function resolveApiEndpoint(endpoint) {
-  if (endpoint.startsWith('api/') && window.location.pathname.includes('/public/')) {
-    return '../' + endpoint;
+function loadStoredLockedSlots() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEYS.LOCKED_SLOTS);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === 'object') return parsed;
+    }
+  } catch (_) {}
+  return {};
+}
+
+function saveLockedSlots() {
+  localStorage.setItem(STORAGE_KEYS.LOCKED_SLOTS, JSON.stringify(state.lockedSlots));
+}
+
+function toggleSlotLock(day, mealType) {
+  const arrozDay = state.preferences.arroz_cubana_day;
+  if (arrozDay !== 'ninguno' && day === arrozDay && mealType === 'comida') {
+    showToast(`El Arroz a la cubana del ${DAY_LABELS[day]} ya está fijado por regla semanal.`);
+    return;
   }
-  return endpoint;
+  const key = `${day}_${mealType}`;
+  if (state.lockedSlots[key]) {
+    delete state.lockedSlots[key];
+    saveLockedSlots();
+    renderPlannerView();
+    showToast(`🔓 Desbloqueado ${DAY_LABELS[day]} (${mealType}).`);
+  } else {
+    const currentRecipeId = Number(state.planMap[day]?.[mealType] || 0);
+    if (currentRecipeId > 0) {
+      state.lockedSlots[key] = currentRecipeId;
+      saveLockedSlots();
+      renderPlannerView();
+      const rec = RECIPES_DB.find(r => r.id === currentRecipeId);
+      showToast(`🔒 Fijado "${rec?.name || 'Plato'}" en ${DAY_LABELS[day]} (${mealType}). No cambiará al regenerar semana.`);
+    }
+  }
+}
+
+function loadStoredCustomShopping() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEYS.CUSTOM_SHOPPING);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) return parsed;
+    }
+  } catch (_) {}
+  return [];
+}
+
+function saveCustomShopping() {
+  localStorage.setItem(STORAGE_KEYS.CUSTOM_SHOPPING, JSON.stringify(state.customShoppingItems));
+}
+
+function loadStoredClinicalProfile() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEYS.CLINICAL_PROFILE);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === 'object') return parsed;
+    }
+  } catch (_) {}
+  return {
+    sex: 'female',
+    age: 42,
+    weight_kg: 74,
+    height_cm: 166,
+    activity_factor: 1.375,
+    deficit_kcal: 450
+  };
+}
+
+function saveClinicalProfile() {
+  localStorage.setItem(STORAGE_KEYS.CLINICAL_PROFILE, JSON.stringify(state.clinicalProfile));
 }
 
 /**
- * Intenta consultar el backend PHP (/api/*.php) cuando corre bajo Apache/PHP (Docker o cPanel).
- * Realiza fallback transparente a motor local en memoria en caso de fallo de red o ausencia de PHP.
- *
- * @param {string} endpoint - Ruta del endpoint relativo
- * @param {RequestInit} [options={}] - Parámetros de la petición fetch
- * @returns {Promise<any|null>} Respuesta parseada o null si no está disponible
+ * Intenta consultar el backend PHP (/api/*.php) cuando corre bajo Apache/PHP (Docker 6666 o cPanel).
  */
 async function apiFetch(endpoint, options = {}) {
   if (state.phpBackendAvailable === false) {
     return null;
   }
   try {
-    const targetUrl = resolveApiEndpoint(endpoint);
-    const res = await fetch(targetUrl, {
+    const res = await fetch(endpoint, {
       headers: { 'Accept': 'application/json', 'Content-Type': 'application/json' },
       ...options
     });
@@ -253,10 +320,27 @@ function showToast(message) {
   }, 3200);
 }
 
+/**
+ * Normaliza y resuelve la ruta de las imágenes de recetas.
+ * Garantiza compatibilidad tanto en la raíz de un dominio como en subdirectorios
+ * de hosting compartido (ej: https://ncoge.com/mio/menu/), eliminando barras
+ * iniciales que forzarían la resolución errónea desde la raíz del dominio del servidor.
+ *
+ * @param {string} relPath - Ruta relativa o URL remota de la imagen
+ * @returns {string} Ruta relativa utilizable por el elemento <img>
+ */
 function resolveImagePath(relPath) {
-  if (!relPath) return 'assets/img/verduras.jpg';
-  if (relPath.startsWith('http') || relPath.startsWith('/')) return relPath;
-  return `/${relPath}`;
+  if (!relPath || typeof relPath !== 'string') {
+    return 'assets/img/verduras.jpg';
+  }
+  const clean = relPath.trim();
+  if (clean.startsWith('http://') || clean.startsWith('https://') || clean.startsWith('data:')) {
+    return clean;
+  }
+  // Si la ruta comienza con una barra diagonal (/), la quitamos para que
+  // el navegador la resuelva de forma relativa al directorio actual (ej. /mio/menu/)
+  const withoutLeadingSlash = clean.replace(/^\/+/, '');
+  return withoutLeadingSlash || 'assets/img/verduras.jpg';
 }
 
 function applyTheme(theme) {
@@ -457,6 +541,7 @@ function renderPlannerView() {
 function renderMealSlotHTML(day, mealType, recipe) {
   const arrozDay = state.preferences.arroz_cubana_day;
   const isFixedCubanaSlot = arrozDay !== 'ninguno' && day === arrozDay && mealType === 'comida';
+  const isUserLocked = Boolean(state.lockedSlots[`${day}_${mealType}`]);
   const mealLabel = mealType === 'comida' ? 'Comida' : 'Cena';
   const isFav = isFavoriteRecipe(recipe.id);
 
@@ -471,6 +556,8 @@ function renderMealSlotHTML(day, mealType, recipe) {
   let ruleNotice = '';
   if (isFixedCubanaSlot) {
     ruleNotice = `<span class="slot-rule-tag is-fixed-friday">Fijo ${DAY_LABELS[day]}</span>`;
+  } else if (isUserLocked) {
+    ruleNotice = `<span class="slot-rule-tag is-fixed-friday">🔒 Fijado</span>`;
   } else if (mealType === 'comida' && recipe.category === 'legumbre') {
     ruleNotice = `<span class="slot-rule-tag">Legumbre</span>`;
   } else if (mealType === 'cena' && recipe.category === 'pescado') {
@@ -487,6 +574,18 @@ function renderMealSlotHTML(day, mealType, recipe) {
           ${ruleNotice}
         </div>
         <div class="slot-thumb-wrap">
+          ${!isFixedCubanaSlot ? `
+            <button
+              type="button"
+              class="fav-star-btn fav-star-overlay ${isUserLocked ? 'is-fav' : ''}"
+              style="left: 6px; right: auto; font-size: 0.78rem;"
+              data-toggle-lock="${day}:${mealType}"
+              aria-label="${isUserLocked ? 'Desbloquear plato de' : 'Fijar con candado plato de'} ${DAY_LABELS[day]} ${mealType}"
+              title="${isUserLocked ? 'Plato fijado (no cambiará al generar nueva semana). Clic para desbloquear' : 'Fijar este plato para que no cambie al generar nueva semana'}"
+            >
+              ${isUserLocked ? '🔒' : '🔓'}
+            </button>
+          ` : ''}
           <button
             type="button"
             class="fav-star-btn fav-star-overlay ${isFav ? 'is-fav' : ''}"
@@ -508,6 +607,7 @@ function renderMealSlotHTML(day, mealType, recipe) {
               alt="${escapeHtml(recipe.name)}"
               loading="lazy"
               referrerpolicy="no-referrer"
+              onerror="this.onerror=null;this.src='assets/img/verduras.jpg';"
             />
           </button>
         </div>
@@ -552,6 +652,10 @@ async function handleQuickSwap(day, mealType) {
   const arrozDay = state.preferences.arroz_cubana_day;
   if (arrozDay !== 'ninguno' && day === arrozDay && mealType === 'comida') {
     showToast(`El ${DAY_LABELS[day]} a mediodía tiene fijado el Arroz a la cubana. Puedes cambiar el día en "Configurar Días y Gustos".`);
+    return;
+  }
+  if (state.lockedSlots[`${day}_${mealType}`]) {
+    showToast(`🔒 Este plato está fijado con candado. Pulsa primero 🔓 sobre la foto si deseas cambiarlo.`);
     return;
   }
 
@@ -684,7 +788,7 @@ function renderAlternativesModalContent() {
               >
                 ${isFav ? '★' : '☆'}
               </button>
-              <img src="${resolveImagePath(r.image_url)}" alt="${escapeHtml(r.name)}" loading="lazy" referrerpolicy="no-referrer" />
+              <img src="${resolveImagePath(r.image_url)}" alt="${escapeHtml(r.name)}" loading="lazy" referrerpolicy="no-referrer" onerror="this.onerror=null;this.src='assets/img/verduras.jpg';" />
             </div>
             <div class="recipe-card-body">
               <p class="recipe-card-kicker tabular-nums">
@@ -894,7 +998,13 @@ async function applyPreferences(shouldRegenerateWeek) {
   savePreferencesToStorage();
 
   if (shouldRegenerateWeek) {
-    state.planMap = generateSeasonalWeeklyPlan(state.season, state.preferences, state.favorites);
+    state.planMap = generateSeasonalWeeklyPlan(
+      state.season,
+      state.preferences,
+      state.favorites,
+      new Set(state.favorites),
+      state.lockedSlots
+    );
   } else if (
     state.preferences.arroz_cubana_day !== 'ninguno' &&
     DAYS_ORDER.includes(state.preferences.arroz_cubana_day)
@@ -974,7 +1084,7 @@ function openRecipeDetailModal(recipeId) {
   bodyEl.innerHTML = `
     <div class="recipe-hero-split">
       <div class="recipe-hero-img-wrap">
-        <img src="${resolveImagePath(recipe.image_url)}" alt="${escapeHtml(recipe.name)}" referrerpolicy="no-referrer" />
+        <img src="${resolveImagePath(recipe.image_url)}" alt="${escapeHtml(recipe.name)}" referrerpolicy="no-referrer" onerror="this.onerror=null;this.src='assets/img/verduras.jpg';" />
       </div>
       <div class="recipe-macros-panel">
         <div>
@@ -1254,7 +1364,7 @@ function renderCatalogView() {
           >
             ${isFav ? '★' : '☆'}
           </button>
-          <img src="${resolveImagePath(r.image_url)}" alt="${escapeHtml(r.name)}" loading="lazy" referrerpolicy="no-referrer" />
+          <img src="${resolveImagePath(r.image_url)}" alt="${escapeHtml(r.name)}" loading="lazy" referrerpolicy="no-referrer" onerror="this.onerror=null;this.src='assets/img/verduras.jpg';" />
         </div>
         <div class="recipe-card-body">
           <p class="recipe-card-kicker tabular-nums">
@@ -1276,31 +1386,39 @@ function renderCatalogView() {
 }
 
 /**
- * Renderiza la Lista de la Compra Exacta, Compacta y Agrupada por Pasillos.
+ * Renderiza la Lista de la Compra Exacta, Compacta y Agrupada por Pasillos + Extras y Filtro de Despensa.
  */
 function renderShoppingListView() {
   const containerEl = document.getElementById('shopping-aisles-grid');
   const summaryEl = document.getElementById('shopping-summary-meta');
+  const pantryBtn = document.getElementById('toggle-pantry-basics-btn');
   if (!containerEl) return;
 
-  const aggregated = aggregateShoppingList(state.planMap, state.diners);
+  if (pantryBtn) {
+    pantryBtn.setAttribute('aria-pressed', state.hidePantryBasics ? 'true' : 'false');
+    pantryBtn.textContent = state.hidePantryBasics
+      ? 'Mostrar básicos de despensa (Sal, AOVE, Ajo)'
+      : 'Ocultar básicos de despensa (Sal, AOVE, Ajo)';
+  }
+
+  const aggregated = aggregateShoppingList(state.planMap, state.diners, RECIPES_DB, INGREDIENTS_DB, state.preferences);
+  let visibleTotal = 0;
   let checkedCount = 0;
 
-  AISLES_ORDER.forEach(aisle => {
-    (aggregated.aisles[aisle] || []).forEach(item => {
+  const aislesHTML = AISLES_ORDER.map(aisle => {
+    const rawItems = aggregated.aisles[aisle] || [];
+    const items = state.hidePantryBasics
+      ? rawItems.filter(it => !PANTRY_BASIC_INGREDIENT_IDS.has(it.ingredient_id))
+      : rawItems;
+
+    if (items.length === 0) return '';
+
+    items.forEach(item => {
+      visibleTotal++;
       if (state.checkedIngredients[item.ingredient_id]) {
         checkedCount++;
       }
     });
-  });
-
-  if (summaryEl) {
-    summaryEl.textContent = `${aggregated.total_items} ingredientes unificados para ${state.diners} ${state.diners === 1 ? 'comensal' : 'comensales'} · ${checkedCount} completados`;
-  }
-
-  containerEl.innerHTML = AISLES_ORDER.map(aisle => {
-    const items = aggregated.aisles[aisle] || [];
-    if (items.length === 0) return '';
 
     return `
       <section class="aisle-block">
@@ -1336,18 +1454,103 @@ function renderShoppingListView() {
       </section>
     `;
   }).join('');
+
+  let customBlockHTML = '';
+  if (state.customShoppingItems.length > 0) {
+    state.customShoppingItems.forEach(ci => {
+      visibleTotal++;
+      if (ci.checked) checkedCount++;
+    });
+
+    customBlockHTML = `
+      <section class="aisle-block" style="border-color: var(--accent-olive);">
+        <header class="aisle-header">
+          <h3 class="aisle-title">Artículos Propios / Desayuno y Hogar</h3>
+          <span class="aisle-count tabular-nums">${state.customShoppingItems.length} extras</span>
+        </header>
+        <ul class="shopping-list-items">
+          ${state.customShoppingItems.map(ci => `
+            <li
+              class="shopping-item ${ci.checked ? 'is-checked' : ''}"
+              data-toggle-custom-shopping="${ci.id}"
+            >
+              <div class="shopping-item-left">
+                <input
+                  type="checkbox"
+                  class="shopping-checkbox"
+                  aria-label="Marcar ${escapeHtml(ci.name)}"
+                  ${ci.checked ? 'checked' : ''}
+                />
+                <div>
+                  <div class="shopping-item-name">${escapeHtml(ci.name)}</div>
+                  <div class="shopping-item-sub">Añadido manualmente</div>
+                </div>
+              </div>
+              <button
+                type="button"
+                class="btn-ghost"
+                style="padding: 0.2rem 0.5rem; font-size: 0.75rem;"
+                data-delete-custom-shopping="${ci.id}"
+                aria-label="Eliminar ${escapeHtml(ci.name)}"
+              >
+                Quitar
+              </button>
+            </li>
+          `).join('')}
+        </ul>
+      </section>
+    `;
+  }
+
+  if (summaryEl) {
+    const pantryNote = state.hidePantryBasics ? ' (básicos de despensa ocultos)' : '';
+    summaryEl.textContent = `${visibleTotal} artículos para ${state.diners} ${state.diners === 1 ? 'comensal' : 'comensales'}${pantryNote} · ${checkedCount} completados`;
+  }
+
+  containerEl.innerHTML = customBlockHTML + aislesHTML;
+}
+
+function handleAddCustomShoppingItem(event) {
+  event.preventDefault();
+  const inputEl = document.getElementById('custom-shopping-input');
+  if (!inputEl) return;
+  const text = inputEl.value.trim();
+  if (!text) {
+    showToast('Escribe el nombre del artículo que quieres añadir a tu lista.');
+    return;
+  }
+  state.customShoppingItems.unshift({
+    id: String(Date.now()),
+    name: text,
+    checked: false
+  });
+  saveCustomShopping();
+  inputEl.value = '';
+  renderShoppingListView();
+  showToast(`Añadido "${text}" a tu lista de la compra.`);
 }
 
 async function copyShoppingListForWhatsApp() {
-  const aggregated = aggregateShoppingList(state.planMap, state.diners);
+  const aggregated = aggregateShoppingList(state.planMap, state.diners, RECIPES_DB, INGREDIENTS_DB, state.preferences);
   const lines = [
     `*LISTA DE LA COMPRA — MEDDIET PRO*`,
     `Estación: ${capitalize(state.season)} · Comensales: ${state.diners}`,
     `--------------------------------`
   ];
 
+  if (state.customShoppingItems.length > 0) {
+    lines.push(`\n*ARTÍCULOS PROPIOS / EXTRAS*`);
+    for (const ci of state.customShoppingItems) {
+      const checkMark = ci.checked ? '[x]' : '[ ]';
+      lines.push(`${checkMark} ${ci.name}`);
+    }
+  }
+
   for (const aisle of AISLES_ORDER) {
-    const items = aggregated.aisles[aisle] || [];
+    const rawItems = aggregated.aisles[aisle] || [];
+    const items = state.hidePantryBasics
+      ? rawItems.filter(it => !PANTRY_BASIC_INGREDIENT_IDS.has(it.ingredient_id))
+      : rawItems;
     if (!items.length) continue;
     lines.push(`\n*${aisle.toUpperCase()}*`);
     for (const item of items) {
@@ -1664,12 +1867,15 @@ function downloadStandalonePrintableDocument() {
 function buildBackupPayload() {
   return {
     app: 'MedDiet Pro',
-    version: '2.0',
+    version: '3.0',
     exported_at: new Date().toISOString(),
     season: state.season,
     diners: state.diners,
     preferences: state.preferences,
     favorites: state.favorites,
+    locked_slots: state.lockedSlots,
+    custom_shopping_items: state.customShoppingItems,
+    clinical_profile: state.clinicalProfile,
     weekly_plan: state.planMap,
     saved_menus: state.savedMenus,
     checked_ingredients: state.checkedIngredients
@@ -1735,6 +1941,24 @@ function renderBackupModalBody() {
             Restaurar Copia de Seguridad
           </button>
         </div>
+      </div>
+    </div>
+
+    <div class="pref-section" style="border-color: var(--accent-olive);">
+      <h3 class="pref-section-title">Código Fuente Completo para Docker (Puerto 6666) y Hosting Compartido LAMP</h3>
+      <p class="pref-section-desc">
+        El botón superior de descarga de la plataforma omite por seguridad archivos sin extensión como <code>Dockerfile</code> o archivos ocultos como <code>.htaccess</code>. Descarga desde aquí el paquete <strong>100% íntegro</strong> con <code>Dockerfile</code>, <code>docker-compose.yml</code>, <code>.htaccess</code>, base de datos MySQL con las 200 recetas (<code>sql/database_install.sql</code>), endpoints PHP y las 18 fotografías gastronómicas.
+      </p>
+      <div style="display: flex; flex-wrap: wrap; gap: 0.65rem; align-items: center; margin-top: 0.35rem;">
+        <a
+          href="/meddiet-pro-lamp-completo.zip"
+          download="meddiet-pro-lamp-completo.zip"
+          class="btn-primary"
+          style="text-decoration: none;"
+        >
+          Descargar meddiet-pro-lamp-completo.zip (100% Completo con Dockerfile)
+        </a>
+        <span class="slot-meta-line tabular-nums">Incluye <code>Dockerfile</code> + <code>docker-compose.yml</code> (puerto 6666) + <code>sql/database_install.sql</code></span>
       </div>
     </div>
 
@@ -1834,6 +2058,18 @@ function restoreFromBackupObject(data) {
     state.checkedIngredients = data.checked_ingredients;
     saveCheckedIngredients();
   }
+  if (data.locked_slots && typeof data.locked_slots === 'object') {
+    state.lockedSlots = data.locked_slots;
+    saveLockedSlots();
+  }
+  if (Array.isArray(data.custom_shopping_items)) {
+    state.customShoppingItems = data.custom_shopping_items;
+    saveCustomShopping();
+  }
+  if (data.clinical_profile && typeof data.clinical_profile === 'object') {
+    state.clinicalProfile = { ...state.clinicalProfile, ...data.clinical_profile };
+    saveClinicalProfile();
+  }
 
   renderAll();
   renderBackupModalBody();
@@ -1853,6 +2089,158 @@ function handleBackupFileUpload(event) {
     }
   };
   reader.readAsText(file);
+}
+
+/**
+ * ============================================================================
+ * MODAL 8: CALCULADORA CLÍNICA (MIFFLIN-ST JEOR / IMC) Y AUDITORÍA DE MACROS
+ * ============================================================================
+ */
+function openClinicalCalculatorModal() {
+  const modal = document.getElementById('clinical-calculator-modal');
+  if (!modal) return;
+  renderClinicalCalculatorBody();
+  modal.classList.add('is-open');
+}
+
+function renderClinicalCalculatorBody() {
+  const bodyEl = document.getElementById('clinical-modal-body');
+  if (!bodyEl) return;
+
+  const p = state.clinicalProfile;
+  const clinical = calculateClinicalTargets(p);
+  const evaluation = evaluateWeeklyPlan(state.planMap, state.preferences);
+  const { compliance } = evaluation;
+
+  bodyEl.innerHTML = `
+    <div class="pref-input-grid">
+      <div class="pref-section">
+        <h3 class="pref-section-title">1. Tus Parámetros Antropométricos (Mifflin-St Jeor)</h3>
+        <p class="pref-section-desc">
+          Introduce tus datos para calcular tu Gasto Energético Total (GET), tu IMC y el déficit calórico clínico seguro recomendado por la SEEDO.
+        </p>
+
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 0.65rem; margin-top: 0.35rem;">
+          <div>
+            <label for="calc-sex-select" class="slot-meta-line" style="display:block; margin-bottom:0.25rem;"><strong>Sexo biológico</strong></label>
+            <select id="calc-sex-select" class="search-input" style="width: 100%; min-width: 0;">
+              <option value="female" ${p.sex === 'female' ? 'selected' : ''}>Mujer</option>
+              <option value="male" ${p.sex === 'male' ? 'selected' : ''}>Hombre</option>
+            </select>
+          </div>
+          <div>
+            <label for="calc-age-input" class="slot-meta-line" style="display:block; margin-bottom:0.25rem;"><strong>Edad (años)</strong></label>
+            <input type="number" id="calc-age-input" class="search-input tabular-nums" style="width: 100%; min-width: 0;" min="18" max="95" value="${p.age}" />
+          </div>
+          <div>
+            <label for="calc-weight-input" class="slot-meta-line" style="display:block; margin-bottom:0.25rem;"><strong>Peso actual (kg)</strong></label>
+            <input type="number" id="calc-weight-input" class="search-input tabular-nums" style="width: 100%; min-width: 0;" min="40" max="220" step="0.5" value="${p.weight_kg}" />
+          </div>
+          <div>
+            <label for="calc-height-input" class="slot-meta-line" style="display:block; margin-bottom:0.25rem;"><strong>Altura (cm)</strong></label>
+            <input type="number" id="calc-height-input" class="search-input tabular-nums" style="width: 100%; min-width: 0;" min="135" max="220" value="${p.height_cm}" />
+          </div>
+        </div>
+
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 0.65rem; margin-top: 0.5rem;">
+          <div>
+            <label for="calc-activity-select" class="slot-meta-line" style="display:block; margin-bottom:0.25rem;"><strong>Actividad física semanal</strong></label>
+            <select id="calc-activity-select" class="search-input" style="width: 100%; min-width: 0;">
+              <option value="1.2" ${Number(p.activity_factor) === 1.2 ? 'selected' : ''}>Sedentario (oficina, pocos pasos)</option>
+              <option value="1.375" ${Number(p.activity_factor) === 1.375 ? 'selected' : ''}>Ligera (caminar 1-3 días/sem)</option>
+              <option value="1.55" ${Number(p.activity_factor) === 1.55 ? 'selected' : ''}>Moderada (deporte 3-5 días/sem)</option>
+              <option value="1.725" ${Number(p.activity_factor) === 1.725 ? 'selected' : ''}>Intensa (entrenamiento 6 días/sem)</option>
+            </select>
+          </div>
+          <div>
+            <label for="calc-deficit-select" class="slot-meta-line" style="display:block; margin-bottom:0.25rem;"><strong>Déficit calórico objetivo</strong></label>
+            <select id="calc-deficit-select" class="search-input" style="width: 100%; min-width: 0;">
+              <option value="350" ${Number(p.deficit_kcal) === 350 ? 'selected' : ''}>Suave (-350 kcal/día · sin hambre)</option>
+              <option value="450" ${Number(p.deficit_kcal) === 450 ? 'selected' : ''}>Clínico estándar (-450 kcal/día)</option>
+              <option value="550" ${Number(p.deficit_kcal) === 550 ? 'selected' : ''}>Intensivo seguro (-550 kcal/día)</option>
+            </select>
+          </div>
+        </div>
+
+        <div style="margin-top: 0.65rem;">
+          <button type="button" class="btn-primary" id="recalculate-clinical-btn">
+            Calcular y Guardar Perfil Clínico
+          </button>
+        </div>
+      </div>
+
+      <div class="pref-section" style="border-color: var(--accent-olive);">
+        <h3 class="pref-section-title">2. Diagnóstico Clínico y Pauta Recomendada</h3>
+        <div class="macros-grid" style="margin-top: 0.25rem;">
+          <div class="macro-item">
+            <div class="macro-label">IMC (${escapeHtml(clinical.bmi_category)})</div>
+            <div class="macro-val tabular-nums">${clinical.bmi} kg/m²</div>
+          </div>
+          <div class="macro-item">
+            <div class="macro-label">Metabolismo Basal / Total</div>
+            <div class="macro-val tabular-nums">${clinical.bmr_kcal} / ${clinical.tdee_kcal} kcal</div>
+          </div>
+          <div class="macro-item">
+            <div class="macro-label">Objetivo Hipocalórico Pautado</div>
+            <div class="macro-val tabular-nums" style="color: var(--accent-olive);">${clinical.target_kcal} kcal/día</div>
+          </div>
+          <div class="macro-item">
+            <div class="macro-label">Pérdida Grasa / Agua Diaria</div>
+            <div class="macro-val tabular-nums">-${clinical.estimated_weekly_loss_kg} kg/sem · ${clinical.recommended_water_liters} L</div>
+          </div>
+        </div>
+        <p class="slot-meta-line" style="margin-top: 0.5rem;">
+          Tu menú semanal actual promedia <strong>${compliance.avg_daily_kcal} kcal/día</strong> (diferencia de <strong>${compliance.avg_daily_kcal - clinical.target_kcal > 0 ? '+' : ''}${compliance.avg_daily_kcal - clinical.target_kcal} kcal</strong> respecto a tu objetivo calculado).
+        </p>
+      </div>
+    </div>
+
+    <div class="pref-section">
+      <h3 class="pref-section-title">3. Auditoría de Macronutrientes de tu Menú Semanal Actual (Media Diaria)</h3>
+      <p class="pref-section-desc">
+        Distribución real calculada sumando tus 14 comidas/cenas planificadas + desayuno y tentempié mediterráneo pautado:
+      </p>
+      <div class="macros-grid" style="grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));">
+        <div class="macro-item">
+          <div class="macro-label">Proteínas Magras (Saciantes)</div>
+          <div class="macro-val tabular-nums">${compliance.avg_daily_protein_g} g/día (${compliance.protein_pct}%)</div>
+          <span class="slot-meta-line">Óptimo preservación muscular</span>
+        </div>
+        <div class="macro-item">
+          <div class="macro-label">Hidratos Complejos (Bajo IG)</div>
+          <div class="macro-val tabular-nums">${compliance.avg_daily_carbs_g} g/día (${compliance.carbs_pct}%)</div>
+          <span class="slot-meta-line">Legumbres, huerta y grano entero</span>
+        </div>
+        <div class="macro-item">
+          <div class="macro-label">Grasas Cardiosaludables (AOVE / Omega-3)</div>
+          <div class="macro-val tabular-nums">${compliance.avg_daily_fat_g} g/día (${compliance.fat_pct}%)</div>
+          <span class="slot-meta-line">Aceite de oliva virgen extra medido</span>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function handleSaveClinicalCalculator() {
+  const sex = document.getElementById('calc-sex-select')?.value || 'female';
+  const age = Number(document.getElementById('calc-age-input')?.value || 42);
+  const weightKg = Number(document.getElementById('calc-weight-input')?.value || 74);
+  const heightCm = Number(document.getElementById('calc-height-input')?.value || 166);
+  const activity = Number(document.getElementById('calc-activity-select')?.value || 1.375);
+  const deficit = Number(document.getElementById('calc-deficit-select')?.value || 450);
+
+  state.clinicalProfile = {
+    sex: sex === 'male' ? 'male' : 'female',
+    age: Math.max(18, Math.min(95, age)),
+    weight_kg: Math.max(40, Math.min(220, weightKg)),
+    height_cm: Math.max(135, Math.min(220, heightCm)),
+    activity_factor: activity,
+    deficit_kcal: deficit
+  };
+  saveClinicalProfile();
+  renderClinicalCalculatorBody();
+  const res = calculateClinicalTargets(state.clinicalProfile);
+  showToast(`Perfil clínico actualizado: Objetivo ${res.target_kcal} kcal/día (-${res.estimated_weekly_loss_kg} kg/semana).`);
 }
 
 /**
@@ -1931,8 +2319,7 @@ async function handleSaveCurrentMenu(event) {
       action: 'save',
       menu_name: menuName,
       season: state.season,
-      diners: state.diners,
-      plan: state.planMap
+      diners: state.diners
     })
   });
 
@@ -2030,6 +2417,15 @@ function setupEventListeners() {
       return;
     }
 
+    // 1b. Candado de fijar plato individual (🔒 / 🔓)
+    const lockBtn = target.closest('[data-toggle-lock]');
+    if (lockBtn) {
+      e.stopPropagation();
+      const [day, meal] = (lockBtn.getAttribute('data-toggle-lock') || '').split(':');
+      if (day && meal) toggleSlotLock(day, meal);
+      return;
+    }
+
     // 2. Navegación principal (Top Bar y Barra Inferior Móvil)
     const navBtn = target.closest('[data-nav-view]');
     if (navBtn) {
@@ -2051,7 +2447,13 @@ function setupEventListeners() {
       if (newSeason && newSeason !== state.season) {
         state.season = newSeason;
         localStorage.setItem(STORAGE_KEYS.SEASON, state.season);
-        state.planMap = generateSeasonalWeeklyPlan(state.season, state.preferences, state.favorites);
+        state.planMap = generateSeasonalWeeklyPlan(
+          state.season,
+          state.preferences,
+          state.favorites,
+          new Set(state.favorites),
+          state.lockedSlots
+        );
         savePlanToStorage();
 
         await apiFetch('api/swap_recipe.php', {
@@ -2066,14 +2468,20 @@ function setupEventListeners() {
         });
 
         renderAll();
-        showToast(`Menú adaptado a productos de ${capitalize(state.season)} respetando tus días configurados.`);
+        showToast(`Menú adaptado a productos de ${capitalize(state.season)} respetando tus platos fijados.`);
       }
       return;
     }
 
-    // 5. Regenerar semana completa
+    // 5. Regenerar semana completa (respetando platos bloqueados con candado 🔒)
     if (target.closest('#regenerate-week-btn')) {
-      state.planMap = generateSeasonalWeeklyPlan(state.season, state.preferences, state.favorites);
+      state.planMap = generateSeasonalWeeklyPlan(
+        state.season,
+        state.preferences,
+        state.favorites,
+        new Set(state.favorites),
+        state.lockedSlots
+      );
       savePlanToStorage();
       await apiFetch('api/swap_recipe.php', {
         method: 'POST',
@@ -2086,7 +2494,12 @@ function setupEventListeners() {
         })
       });
       renderAll();
-      showToast(`Nueva semana hipocalórica generada sin repeticiones (${capitalize(state.season)}).`);
+      const lockedCount = Object.keys(state.lockedSlots).length;
+      showToast(
+        lockedCount > 0
+          ? `Nueva semana generada manteniendo tus ${lockedCount} plato(s) fijado(s) con candado 🔒.`
+          : `Nueva semana hipocalórica generada sin repeticiones (${capitalize(state.season)}).`
+      );
       return;
     }
 
@@ -2339,7 +2752,40 @@ function setupEventListeners() {
       return;
     }
 
-    // 19. Checkboxes en Lista de la Compra
+    // 19. Checkboxes y controles en Lista de la Compra
+    if (target.closest('#toggle-pantry-basics-btn')) {
+      state.hidePantryBasics = !state.hidePantryBasics;
+      renderShoppingListView();
+      showToast(
+        state.hidePantryBasics
+          ? 'Básicos de despensa (AOVE, ajo, caldo, pimentón) ocultados de la vista.'
+          : 'Mostrando todos los ingredientes de despensa.'
+      );
+      return;
+    }
+
+    const deleteCustomBtn = target.closest('[data-delete-custom-shopping]');
+    if (deleteCustomBtn) {
+      e.stopPropagation();
+      const cid = deleteCustomBtn.getAttribute('data-delete-custom-shopping');
+      state.customShoppingItems = state.customShoppingItems.filter(it => String(it.id) !== String(cid));
+      saveCustomShopping();
+      renderShoppingListView();
+      return;
+    }
+
+    const customShoppingRow = target.closest('[data-toggle-custom-shopping]');
+    if (customShoppingRow) {
+      const cid = customShoppingRow.getAttribute('data-toggle-custom-shopping');
+      const item = state.customShoppingItems.find(it => String(it.id) === String(cid));
+      if (item) {
+        item.checked = !item.checked;
+        saveCustomShopping();
+        renderShoppingListView();
+      }
+      return;
+    }
+
     const shoppingRow = target.closest('[data-toggle-ingredient]');
     if (shoppingRow) {
       const ingId = shoppingRow.getAttribute('data-toggle-ingredient');
@@ -2353,7 +2799,9 @@ function setupEventListeners() {
 
     if (target.closest('#clear-checked-shopping-btn')) {
       state.checkedIngredients = {};
+      state.customShoppingItems.forEach(it => { it.checked = false; });
       saveCheckedIngredients();
+      saveCustomShopping();
       renderShoppingListView();
       showToast('Marcas de compra reiniciadas.');
       return;
@@ -2368,6 +2816,16 @@ function setupEventListeners() {
       document.body.removeAttribute('data-print-mode');
       setPagePrintOrientationCSS(false);
       window.print();
+      return;
+    }
+
+    // 19b. Calculadora Clínica y Macros
+    if (target.closest('#open-clinical-calc-btn')) {
+      openClinicalCalculatorModal();
+      return;
+    }
+    if (target.closest('#recalculate-clinical-btn')) {
+      handleSaveClinicalCalculator();
       return;
     }
 
@@ -2419,6 +2877,12 @@ function setupEventListeners() {
     saveMenuForm.addEventListener('submit', handleSaveCurrentMenu);
   }
 
+  // Formulario de añadir artículo personalizado a la lista de la compra
+  const addCustomShoppingForm = document.getElementById('add-custom-shopping-form');
+  if (addCustomShoppingForm) {
+    addCustomShoppingForm.addEventListener('submit', handleAddCustomShoppingItem);
+  }
+
   // Cerrar modales con tecla Escape
   document.addEventListener('keydown', e => {
     if (e.key === 'Escape') {
@@ -2431,4 +2895,9 @@ document.addEventListener('DOMContentLoaded', () => {
   applyTheme(state.theme);
   setupEventListeners();
   syncInitialData();
+
+  // Registrar Service Worker para caché offline en supermercado / cocina (ruta relativa)
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('sw.js').catch(() => {});
+  }
 });

@@ -1,7 +1,7 @@
 <?php
 /**
  * MedDiet Pro — API: Obtener Menú Semanal Activo y Métricas Nutricionales
- * Endpoint: GET /api/get_menu.php?season=primavera&diners=2
+ * Endpoint: GET /api/get_menu.php?season=primavera&diners=2&arroz_day=viernes
  */
 
 declare(strict_types=1);
@@ -15,13 +15,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
 try {
     $pdo = getDbConnection();
 
-    $season = isset($_GET['season']) ? strtolower(trim((string)$_GET['season'])) : 'primavera';
-    $allowedSeasons = ['primavera', 'verano', 'otono', 'invierno'];
-    if (!in_array($season, $allowedSeasons, true)) {
-        $season = 'primavera';
-    }
-
+    $season = sanitizeSeason((string)($_GET['season'] ?? 'primavera'));
     $diners = isset($_GET['diners']) ? max(1, min(12, (int)$_GET['diners'])) : 2;
+    $arrozDayRaw = strtolower(trim((string)($_GET['arroz_day'] ?? 'viernes')));
+    $arrozDay = ($arrozDayRaw === 'ninguno') ? 'ninguno' : sanitizeDayOfWeek($arrozDayRaw, 'viernes');
+
+    // Si hay un día configurado para el Arroz blanco a la cubana ligero, asegurar que esté asignado a ese día
+    if ($arrozDay !== 'ninguno') {
+        $stmtLock = $pdo->prepare("UPDATE weekly_plans SET recipe_id = 1, is_locked = 1 WHERE day_of_week = :day AND meal_type = 'comida'");
+        $stmtLock->execute([':day' => $arrozDay]);
+    }
 
     $sql = "
         SELECT 
@@ -55,7 +58,7 @@ try {
     $stmt = $pdo->query($sql);
     $rows = $stmt->fetchAll();
 
-    // Base calórica ligera de desayuno + media mañana/merienda mediterránea (café/infusión + tostada integral con tomate o yogur natural + fruta = 690 kcal/día)
+    // Base calórica ligera de desayuno + media mañana/merienda mediterránea (690 kcal/día)
     $baseBreakfastSnackKcal = 690;
 
     $days = [
@@ -70,7 +73,7 @@ try {
 
     $legumeLunchCount = 0;
     $fishDinnerCount = 0;
-    $fridayCubanaFixed = false;
+    $cubanaLocked = ($arrozDay === 'ninguno');
 
     foreach ($rows as $row) {
         $day = $row['day_of_week'];
@@ -84,8 +87,8 @@ try {
         if ($meal === 'cena' && $row['category'] === 'pescado') {
             $fishDinnerCount++;
         }
-        if ($day === 'viernes' && $meal === 'comida' && (int)$row['recipe_id'] === 1) {
-            $fridayCubanaFixed = true;
+        if ($arrozDay !== 'ninguno' && $day === $arrozDay && $meal === 'comida' && (int)$row['recipe_id'] === 1) {
+            $cubanaLocked = true;
         }
     }
 
@@ -93,20 +96,21 @@ try {
     $avgDailyKcal = (int)round($totalWeekKcal / 7);
 
     // Obtener menús guardados
-    $savedStmt = $pdo->query("SELECT id, menu_name, season, diners, avg_daily_kcal, created_at FROM saved_menus ORDER BY created_at DESC LIMIT 20");
+    $savedStmt = $pdo->query("SELECT id, menu_name, season, diners, avg_daily_kcal, created_at FROM saved_menus ORDER BY created_at DESC LIMIT 30");
     $savedMenus = $savedStmt->fetchAll();
 
     sendJsonResponse([
         'ok' => true,
         'season' => $season,
         'diners' => $diners,
+        'arroz_day' => $arrozDay,
         'days' => $days,
         'compliance' => [
             'legume_lunches' => $legumeLunchCount,
             'legume_target' => 2,
             'fish_dinners' => $fishDinnerCount,
             'fish_target' => 2,
-            'friday_cubana_locked' => $fridayCubanaFixed,
+            'friday_cubana_locked' => $cubanaLocked,
             'zero_seafood_cod_monkfish' => true,
             'avg_daily_kcal' => $avgDailyKcal,
             'base_breakfast_snack_kcal' => $baseBreakfastSnackKcal
@@ -114,8 +118,5 @@ try {
         'saved_menus' => $savedMenus
     ]);
 } catch (Throwable $e) {
-    sendJsonResponse([
-        'ok' => false,
-        'error' => 'Error al obtener el menú semanal: ' . $e->getMessage()
-    ], 500);
+    handleApiException($e, 'Error al obtener el menú semanal');
 }

@@ -15,6 +15,8 @@ declare(strict_types=1);
     <meta property="og:description" content="Aplicación web profesional (LAMP + Vanilla JS ES6+) con 200 recetas mediterráneas españolas hipocalóricas verificadas, personalización de días, generador de PDF apaisado para nevera y recetario paso a paso, favoritos y copias de seguridad." />
     <meta property="og:type" content="website" />
     <meta name="twitter:card" content="summary_large_image" />
+    <meta name="theme-color" content="#3A5F32" />
+    <link rel="manifest" href="manifest.webmanifest" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,600;9..144,700&family=JetBrains+Mono:wght@500;700&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
@@ -92,6 +94,9 @@ declare(strict_types=1);
           <div class="utility-actions-group">
             <button type="button" class="btn-secondary" id="open-preferences-btn">
               Configurar Días y Gustos
+            </button>
+            <button type="button" class="btn-secondary" id="open-clinical-calc-btn">
+              Calculadora Clínica y Macros
             </button>
             <button type="button" class="btn-secondary" id="open-fridge-pdf-btn">
               PDF Calendario Nevera (Apaisado)
@@ -184,6 +189,9 @@ declare(strict_types=1);
           </div>
 
           <div style="display: flex; flex-wrap: wrap; gap: 0.6rem;">
+            <button type="button" class="btn-secondary" id="toggle-pantry-basics-btn" aria-pressed="false">
+              Ocultar básicos de despensa (Sal, AOVE, Ajo)
+            </button>
             <button type="button" class="btn-primary" id="copy-whatsapp-btn">
               Copiar lista para WhatsApp
             </button>
@@ -195,6 +203,22 @@ declare(strict_types=1);
             </button>
           </div>
         </div>
+
+        <form id="add-custom-shopping-form" class="sort-bar" style="margin-bottom: 1.15rem; gap: 0.65rem;" aria-label="Añadir artículo personalizado a la lista de la compra">
+          <label for="custom-shopping-input" class="slot-meta-line"><strong>Añadir extra o producto de desayuno/hogar:</strong></label>
+          <div style="display: flex; flex-wrap: wrap; gap: 0.5rem; flex: 1;">
+            <input
+              type="text"
+              id="custom-shopping-input"
+              class="search-input"
+              style="flex: 1; min-width: 220px;"
+              placeholder="Ej. Yogur natural 0%, Fruta de temporada, Café en grano, Papel de horno..."
+            />
+            <button type="submit" class="btn-secondary">
+              + Añadir a mi compra
+            </button>
+          </div>
+        </form>
 
         <div class="shopping-grid" id="shopping-aisles-grid"></div>
       </section>
@@ -378,6 +402,21 @@ declare(strict_types=1);
           </button>
         </header>
         <div class="modal-body" id="backup-modal-body"></div>
+      </div>
+    </div>
+
+    <div class="modal-backdrop" id="clinical-calculator-modal" role="dialog" aria-modal="true" aria-labelledby="clinical-modal-title">
+      <div class="modal-dialog is-wide">
+        <header class="modal-header">
+          <div>
+            <h2 class="modal-title" id="clinical-modal-title">Calculadora Clínica de Déficit Calórico, IMC y Macronutrientes</h2>
+            <p class="slot-meta-line">Ecuación clínica de Mifflin-St Jeor + criterios SEEDO/OMS y auditoría en vivo de proteínas, hidratos y grasas de tu semana.</p>
+          </div>
+          <button type="button" class="btn-secondary" data-close-modal="true" aria-label="Cerrar calculadora clínica">
+            Cerrar
+          </button>
+        </header>
+        <div class="modal-body" id="clinical-modal-body"></div>
       </div>
     </div>
 

@@ -1,25 +1,33 @@
 #!/usr/bin/env bash
 # ============================================================================
-# MedDiet Pro — Script de Arranque Rápido en Local (Docker Puerto 5566)
-# Restaura automáticamente Dockerfile y .htaccess si el exportador ZIP de
-# AI Studio omitió archivos sin extensión o empezados por punto.
+# MedDiet Pro — Script de Preparación Local y Arranque en Docker (Puerto 6666)
+# Restaura automáticamente Dockerfile, .htaccess y .gitignore si se descargaron
+# desde el botón superior de AI Studio (que filtra ficheros sin extensión/ocultos).
 # ============================================================================
 set -e
 
+echo "==> Comprobando archivos de configuración LAMP, Docker y Git..."
+
 if [ ! -f "Dockerfile" ] && [ -f "Dockerfile.txt" ]; then
   cp Dockerfile.txt Dockerfile
-  echo "[OK] Dockerfile restaurado desde Dockerfile.txt"
+  echo "  [OK] Restaurado Dockerfile desde Dockerfile.txt"
 fi
 
 if [ ! -f ".htaccess" ] && [ -f "htaccess.conf" ]; then
   cp htaccess.conf .htaccess
-  echo "[OK] .htaccess restaurado desde htaccess.conf"
+  echo "  [OK] Restaurado .htaccess desde htaccess.conf"
 fi
 
-echo "Levantando MedDiet Pro en Docker (Apache + PHP 8.2 + MariaDB 10.6 + phpMyAdmin)..."
+if [ ! -f ".gitignore" ] && [ -f "gitignore.txt" ]; then
+  cp gitignore.txt .gitignore
+  echo "  [OK] Restaurado .gitignore desde gitignore.txt"
+fi
+
+echo "==> Levantando contenedores Docker (Web en puerto 6666, phpMyAdmin en 6667)..."
 docker compose up -d --build
+
 echo ""
-echo "=================================================================="
-echo " MedDiet Pro disponible en: http://localhost:5566"
-echo " phpMyAdmin disponible en:  http://localhost:5567"
-echo "=================================================================="
+echo "============================================================================"
+echo "  MedDiet Pro está corriendo en:  http://localhost:6666"
+echo "  phpMyAdmin disponible en:       http://localhost:6667"
+echo "============================================================================"

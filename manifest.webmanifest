@@ -1,0 +1,21 @@
+{
+  "name": "MedDiet Pro — Planificador Clínico Mediterráneo Español",
+  "short_name": "MedDiet Pro",
+  "description": "Planificador semanal de 200 menús mediterráneos españoles hipocalóricos (1.350-1.600 kcal/día), lista de la compra por pasillos y Batch Cooking dominical.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#FAF8F3",
+  "theme_color": "#3A5F32",
+  "lang": "es-ES",
+  "orientation": "any",
+  "categories": ["health", "food", "lifestyle"],
+  "icons": [
+    {
+      "src": "assets/img/arroz_cubana.jpg",
+      "sizes": "512x512",
+      "type": "image/jpeg",
+      "purpose": "any"
+    }
+  ]
+}

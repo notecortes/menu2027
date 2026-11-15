@@ -17,57 +17,38 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
 
 try {
     $pdo = getDbConnection();
-    $rawBody = file_get_contents('php://input');
-    $input = json_decode($rawBody ?: '{}', true) ?? [];
-    $action = $input['action'] ?? 'save';
+    $input = readJsonInput();
+    $action = (string)($input['action'] ?? 'save');
 
     if ($action === 'save') {
-        $menuName = trim((string)($input['menu_name'] ?? ''));
+        $menuName = mb_substr(trim((string)($input['menu_name'] ?? '')), 0, 120);
         if ($menuName === '') {
             sendJsonResponse(['ok' => false, 'error' => 'Por favor, indica un nombre descriptivo para guardar el menú semanal.'], 400);
         }
 
-        $season = strtolower(trim((string)($input['season'] ?? 'primavera')));
+        $season = sanitizeSeason((string)($input['season'] ?? 'primavera'));
         $diners = max(1, min(12, (int)($input['diners'] ?? 2)));
 
-        if (isset($input['plan']) && is_array($input['plan'])) {
-            $planMap = $input['plan'];
-            $rIds = [];
-            foreach ($planMap as $dayMeals) {
-                if (is_array($dayMeals)) {
-                    if (isset($dayMeals['comida'])) $rIds[] = (int)$dayMeals['comida'];
-                    if (isset($dayMeals['cena'])) $rIds[] = (int)$dayMeals['cena'];
-                }
-            }
-            $totalMealsKcal = 0;
-            if (count($rIds) > 0) {
-                $placeholders = implode(',', array_fill(0, count($rIds), '?'));
-                $stmtK = $pdo->prepare("SELECT SUM(kcal) FROM recipes WHERE id IN ($placeholders)");
-                $stmtK->execute($rIds);
-                $totalMealsKcal = (int)$stmtK->fetchColumn();
-            }
-            $avgDailyKcal = (int)round(($totalMealsKcal / 7) + 690);
-        } else {
-            $wpStmt = $pdo->query("
-                SELECT wp.day_of_week, wp.meal_type, wp.recipe_id, r.kcal
-                FROM weekly_plans wp
-                INNER JOIN recipes r ON wp.recipe_id = r.id
-            ");
-            $rows = $wpStmt->fetchAll();
+        $wpStmt = $pdo->query("
+            SELECT wp.day_of_week, wp.meal_type, wp.recipe_id, r.kcal
+            FROM weekly_plans wp
+            INNER JOIN recipes r ON wp.recipe_id = r.id
+        ");
+        $rows = $wpStmt->fetchAll();
 
-            $planMap = [];
-            $totalMealsKcal = 0;
-            foreach ($rows as $r) {
-                $d = $r['day_of_week'];
-                $m = $r['meal_type'];
-                if (!isset($planMap[$d])) {
-                    $planMap[$d] = [];
-                }
-                $planMap[$d][$m] = (int)$r['recipe_id'];
-                $totalMealsKcal += (int)$r['kcal'];
+        $planMap = [];
+        $totalMealsKcal = 0;
+        foreach ($rows as $r) {
+            $d = $r['day_of_week'];
+            $m = $r['meal_type'];
+            if (!isset($planMap[$d])) {
+                $planMap[$d] = [];
             }
-            $avgDailyKcal = (int)round(($totalMealsKcal / 7) + 690);
+            $planMap[$d][$m] = (int)$r['recipe_id'];
+            $totalMealsKcal += (int)$r['kcal'];
         }
+
+        $avgDailyKcal = (int)round(($totalMealsKcal / 7) + 690);
 
         $ins = $pdo->prepare("
             INSERT INTO saved_menus (menu_name, season, diners, plan_json, avg_daily_kcal)
@@ -102,12 +83,17 @@ try {
         $upd = $pdo->prepare("UPDATE weekly_plans SET recipe_id = :rid, is_locked = :lck WHERE day_of_week = :day AND meal_type = :meal");
 
         foreach ($planMap as $day => $meals) {
+            if (!is_array($meals)) continue;
+            $safeDay = sanitizeDayOfWeek((string)$day);
             foreach ($meals as $mealType => $rid) {
+                $safeMeal = sanitizeMealType((string)$mealType);
+                $recipeId = max(1, (int)$rid);
+                $isCubana = ($recipeId === 1) ? 1 : 0;
                 $upd->execute([
-                    ':rid'  => (int)$rid,
-                    ':lck'  => 0,
-                    ':day'  => $day,
-                    ':meal' => $mealType
+                    ':rid'  => $recipeId,
+                    ':lck'  => $isCubana,
+                    ':day'  => $safeDay,
+                    ':meal' => $safeMeal
                 ]);
             }
         }
@@ -130,5 +116,5 @@ try {
 
     sendJsonResponse(['ok' => false, 'error' => 'Acción no soportada.'], 400);
 } catch (Throwable $e) {
-    sendJsonResponse(['ok' => false, 'error' => $e->getMessage()], 500);
+    handleApiException($e, 'Error al gestionar menús guardados');
 }

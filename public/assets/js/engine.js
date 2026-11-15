@@ -1520,9 +1520,17 @@ export function evaluateWeeklyPlan(planMap, prefsOrRecipes = DEFAULT_USER_PREFER
   let legumeLunches = 0;
   let fishDinners = 0;
   let totalDailyKcalSum = 0;
+  let totalDailyProteinSum = 0;
+  let totalDailyCarbsSum = 0;
+  let totalDailyFatSum = 0;
   const daysDetailed = {};
   const usedIds = new Set();
   let uniqueMealsCount = 0;
+
+  // Base desayuno + tentempié mediterráneo (690 kcal = ~28g proteína, ~82g HC complejos, ~26g grasas saludables AOVE/frutos secos)
+  const BASE_PROTEIN_G = 28;
+  const BASE_CARBS_G = 82;
+  const BASE_FAT_G = 26;
 
   for (const day of DAYS_ORDER) {
     const slot = planMap[day] || { comida: 21, cena: 32 };
@@ -1546,7 +1554,14 @@ export function evaluateWeeklyPlan(planMap, prefsOrRecipes = DEFAULT_USER_PREFER
     }
 
     const dailyKcal = BASE_BREAKFAST_SNACK_KCAL + lunchRecipe.kcal + dinnerRecipe.kcal;
+    const dailyProtein = BASE_PROTEIN_G + Number(lunchRecipe.protein_g || 0) + Number(dinnerRecipe.protein_g || 0);
+    const dailyCarbs = BASE_CARBS_G + Number(lunchRecipe.carbs_g || 0) + Number(dinnerRecipe.carbs_g || 0);
+    const dailyFat = BASE_FAT_G + Number(lunchRecipe.fat_g || 0) + Number(dinnerRecipe.fat_g || 0);
+
     totalDailyKcalSum += dailyKcal;
+    totalDailyProteinSum += dailyProtein;
+    totalDailyCarbsSum += dailyCarbs;
+    totalDailyFatSum += dailyFat;
 
     daysDetailed[day] = {
       comida: {
@@ -1563,11 +1578,23 @@ export function evaluateWeeklyPlan(planMap, prefsOrRecipes = DEFAULT_USER_PREFER
         meal_type: 'cena',
         is_locked: 0
       },
-      daily_kcal: dailyKcal
+      daily_kcal: dailyKcal,
+      daily_protein_g: dailyProtein,
+      daily_carbs_g: dailyCarbs,
+      daily_fat_g: dailyFat
     };
   }
 
   const avgDailyKcal = Math.round(totalDailyKcalSum / 7);
+  const avgDailyProteinG = Math.round(totalDailyProteinSum / 7);
+  const avgDailyCarbsG = Math.round(totalDailyCarbsSum / 7);
+  const avgDailyFatG = Math.round(totalDailyFatSum / 7);
+
+  const macroKcalTotal = Math.max(1, (avgDailyProteinG * 4) + (avgDailyCarbsG * 4) + (avgDailyFatG * 9));
+  const proteinPct = Math.round(((avgDailyProteinG * 4) / macroKcalTotal) * 100);
+  const carbsPct = Math.round(((avgDailyCarbsG * 4) / macroKcalTotal) * 100);
+  const fatPct = Math.max(0, 100 - proteinPct - carbsPct);
+
   const cubanaLockedOk = cubanaDay === 'ninguno' ? true : (daysDetailed[cubanaDay]?.comida?.id === 1);
 
   return {
@@ -1586,8 +1613,62 @@ export function evaluateWeeklyPlan(planMap, prefsOrRecipes = DEFAULT_USER_PREFER
       no_repeats_in_week: uniqueMealsCount === 14,
       within_hypocaloric_range: avgDailyKcal >= 1200 && avgDailyKcal <= 1750,
       avg_daily_kcal: avgDailyKcal,
+      avg_daily_protein_g: avgDailyProteinG,
+      avg_daily_carbs_g: avgDailyCarbsG,
+      avg_daily_fat_g: avgDailyFatG,
+      protein_pct: proteinPct,
+      carbs_pct: carbsPct,
+      fat_pct: fatPct,
       base_breakfast_snack_kcal: BASE_BREAKFAST_SNACK_KCAL
     }
+  };
+}
+
+/**
+ * Calculadora clínica nutricional (Fórmula de Mifflin-St Jeor + SEEDO/OMS).
+ */
+export function calculateClinicalTargets(profile = {}) {
+  const sex = profile.sex === 'male' ? 'male' : 'female';
+  const age = Math.max(18, Math.min(95, Number(profile.age) || 42));
+  const weightKg = Math.max(40, Math.min(220, Number(profile.weight_kg) || 74));
+  const heightCm = Math.max(135, Math.min(220, Number(profile.height_cm) || 166));
+  const activity = Number(profile.activity_factor) || 1.375;
+  const deficitKcal = Math.max(250, Math.min(750, Number(profile.deficit_kcal) || 450));
+
+  const heightM = heightCm / 100;
+  const bmi = Math.round((weightKg / (heightM * heightM)) * 10) / 10;
+
+  let bmiCategory = 'Normopeso saludable';
+  if (bmi < 18.5) bmiCategory = 'Bajo peso';
+  else if (bmi < 25) bmiCategory = 'Normopeso saludable';
+  else if (bmi < 27) bmiCategory = 'Sobrepeso grado I';
+  else if (bmi < 30) bmiCategory = 'Sobrepeso grado II (preobesidad)';
+  else bmiCategory = 'Obesidad clínica';
+
+  const bmr = Math.round(
+    (10 * weightKg) + (6.25 * heightCm) - (5 * age) + (sex === 'male' ? 5 : -161)
+  );
+  const tdee = Math.round(bmr * activity);
+  const safeMinKcal = sex === 'male' ? 1350 : 1200;
+  const targetKcal = Math.max(safeMinKcal, tdee - deficitKcal);
+  const effectiveDeficit = Math.max(0, tdee - targetKcal);
+  const weeklyLossKg = Math.round(((effectiveDeficit * 7) / 7700) * 100) / 100;
+  const waterLiters = Math.round(((weightKg * 35) / 1000) * 10) / 10;
+
+  return {
+    sex,
+    age,
+    weight_kg: weightKg,
+    height_cm: heightCm,
+    activity_factor: activity,
+    bmi,
+    bmi_category: bmiCategory,
+    bmr_kcal: bmr,
+    tdee_kcal: tdee,
+    target_kcal: targetKcal,
+    effective_deficit_kcal: effectiveDeficit,
+    estimated_weekly_loss_kg: weeklyLossKg,
+    recommended_water_liters: waterLiters
   };
 }
 
@@ -1718,12 +1799,14 @@ export function getCompatibleAlternatives(
  * - Los días elegidos para las Legumbres
  * - Las noches elegidas para el Pescado permitido
  * - Las preferencias "Quiero incluir" y "No quiero en la semana"
+ * - Los huecos fijados manualmente con candado (lockedSlots)
  */
 export function generateSeasonalWeeklyPlan(
   season = 'primavera',
   prefsOrRecipes = DEFAULT_USER_PREFERENCES,
   favsOrPrefs = [],
-  favoritesSetMaybe = new Set()
+  favoritesSetMaybe = new Set(),
+  lockedSlots = {}
 ) {
   let recipes = RECIPES_DB;
   let rawPrefs = DEFAULT_USER_PREFERENCES;
@@ -1783,6 +1866,14 @@ export function generateSeasonalWeeklyPlan(
   );
 
   const usedRecipeIds = new Set(cubanaDay !== 'ninguno' ? [1] : []);
+  // Pre-registrar en usedRecipeIds cualquier plato fijado manualmente por el comensal
+  if (lockedSlots && typeof lockedSlots === 'object') {
+    for (const lockedRecipeId of Object.values(lockedSlots)) {
+      const numId = Number(lockedRecipeId);
+      if (numId > 0) usedRecipeIds.add(numId);
+    }
+  }
+
   const pickUnique = (pool, fallbackId = 21) => {
     for (const candidate of pool) {
       if (!usedRecipeIds.has(candidate.id)) {
@@ -1795,9 +1886,14 @@ export function generateSeasonalWeeklyPlan(
 
   const newPlan = {};
   for (const day of DAYS_ORDER) {
+    const lockedLunch = Number(lockedSlots?.[`${day}_comida`] || 0);
+    const lockedDinner = Number(lockedSlots?.[`${day}_cena`] || 0);
+
     let comidaId;
     if (cubanaDay !== 'ninguno' && day === cubanaDay) {
       comidaId = 1;
+    } else if (lockedLunch > 0) {
+      comidaId = lockedLunch;
     } else if (legumeDays.includes(day)) {
       comidaId = pickUnique(legumesPool, 2);
     } else {
@@ -1805,7 +1901,9 @@ export function generateSeasonalWeeklyPlan(
     }
 
     let cenaId;
-    if (fishNights.includes(day)) {
+    if (lockedDinner > 0) {
+      cenaId = lockedDinner;
+    } else if (fishNights.includes(day)) {
       cenaId = pickUnique(fishPool, 11);
     } else {
       cenaId = pickUnique(dinnerPool, 32);
@@ -1823,7 +1921,7 @@ export function generateSeasonalWeeklyPlan(
  */
 export function aggregateShoppingList(planMap, diners = 2, recipes = RECIPES_DB, ingredients = INGREDIENTS_DB, userPrefs = DEFAULT_USER_PREFERENCES) {
   const clampedDiners = Math.max(1, Math.min(12, Number(diners) || 2));
-  const cubanaDay = userPrefs?.cubana_day || 'viernes';
+  const cubanaDay = userPrefs?.arroz_cubana_day || userPrefs?.cubana_day || 'viernes';
   const recipesById = new Map(recipes.map(r => [r.id, r]));
   const ingById = new Map(ingredients.map(i => [i.id, i]));
 
@@ -1832,7 +1930,7 @@ export function aggregateShoppingList(planMap, diners = 2, recipes = RECIPES_DB,
   for (const day of DAYS_ORDER) {
     const slot = planMap[day] || { comida: 21, cena: 32 };
     const mealIds = [
-      day === cubanaDay ? 1 : Number(slot.comida),
+      (cubanaDay !== 'ninguno' && day === cubanaDay) ? 1 : Number(slot.comida),
       Number(slot.cena)
     ];
 
@@ -1898,13 +1996,13 @@ export function aggregateShoppingList(planMap, diners = 2, recipes = RECIPES_DB,
  * Genera el plan dominical de Batch Cooking (60-90 min) analizando los 14 platos activos.
  */
 export function generateBatchCookingPlan(planMap, diners = 2, recipes = RECIPES_DB, userPrefs = DEFAULT_USER_PREFERENCES) {
-  const cubanaDay = userPrefs?.cubana_day || 'viernes';
+  const cubanaDay = userPrefs?.arroz_cubana_day || userPrefs?.cubana_day || 'viernes';
   const byId = new Map(recipes.map(r => [r.id, r]));
   const activeRecipes = [];
 
   for (const day of DAYS_ORDER) {
     const slot = planMap[day] || { comida: 21, cena: 32 };
-    const rLunch = byId.get(day === cubanaDay ? 1 : Number(slot.comida));
+    const rLunch = byId.get((cubanaDay !== 'ninguno' && day === cubanaDay) ? 1 : Number(slot.comida));
     const rDinner = byId.get(Number(slot.cena));
     if (rLunch) activeRecipes.push({ day: DAY_LABELS[day], meal: 'Comida', recipe: rLunch });
     if (rDinner) activeRecipes.push({ day: DAY_LABELS[day], meal: 'Cena', recipe: rDinner });
