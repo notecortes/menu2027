@@ -1944,24 +1944,6 @@ function renderBackupModalBody() {
       </div>
     </div>
 
-    <div class="pref-section" style="border-color: var(--accent-olive);">
-      <h3 class="pref-section-title">Código Fuente Completo para Docker (Puerto 6666) y Hosting Compartido LAMP</h3>
-      <p class="pref-section-desc">
-        El botón superior de descarga de la plataforma omite por seguridad archivos sin extensión como <code>Dockerfile</code> o archivos ocultos como <code>.htaccess</code>. Descarga desde aquí el paquete <strong>100% íntegro</strong> con <code>Dockerfile</code>, <code>docker-compose.yml</code>, <code>.htaccess</code>, base de datos MySQL con las 200 recetas (<code>sql/database_install.sql</code>), endpoints PHP y las 18 fotografías gastronómicas.
-      </p>
-      <div style="display: flex; flex-wrap: wrap; gap: 0.65rem; align-items: center; margin-top: 0.35rem;">
-        <a
-          href="/meddiet-pro-lamp-completo.zip"
-          download="meddiet-pro-lamp-completo.zip"
-          class="btn-primary"
-          style="text-decoration: none;"
-        >
-          Descargar meddiet-pro-lamp-completo.zip (100% Completo con Dockerfile)
-        </a>
-        <span class="slot-meta-line tabular-nums">Incluye <code>Dockerfile</code> + <code>docker-compose.yml</code> (puerto 6666) + <code>sql/database_install.sql</code></span>
-      </div>
-    </div>
-
     <div class="pref-section">
       <h3 class="pref-section-title">Tus Platos Favoritos Guardados (★ ${favRecipes.length})</h3>
       <p class="pref-section-desc">
