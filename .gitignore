@@ -1,0 +1,14 @@
+# Datos locales de MariaDB / MySQL en Docker (evita fallos de permisos root y binarios de BD)
+data/
+
+# Ficheros de la carpeta docs
+docs/*
+!docs/.gitkeep
+
+# Archivos de entorno local y temporales
+.env
+*.log
+
+# Archivos del sistema
+.DS_Store
+Thumbs.db

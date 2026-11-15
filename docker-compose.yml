@@ -1,0 +1,69 @@
+version: '3.8'
+
+services:
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: meddiet_web_aistudio2
+    restart: unless-stopped
+    ports:
+      - "5566:80"
+    environment:
+      DOCKER_ENV: "true"
+      DB_HOST: db
+      DB_PORT: "3306"
+      DB_NAME: meddiet_pro
+      DB_USER: meddiet_user
+      DB_PASS: meddiet_secret_2026
+    volumes:
+      - ./:/var/www/html
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - meddiet_net_aistudio2
+
+  db:
+    image: mariadb:10.6
+    container_name: meddiet_db_aistudio2
+    restart: unless-stopped
+    command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
+    environment:
+      MYSQL_ROOT_PASSWORD: root_meddiet_2026
+      MYSQL_DATABASE: meddiet_pro
+      MYSQL_USER: meddiet_user
+      MYSQL_PASSWORD: meddiet_secret_2026
+    ports:
+      - "55060:3306"
+    volumes:
+      - ./data/mysql:/var/lib/mysql
+      - ./sql/database_install.sql:/docker-entrypoint-initdb.d/01_database_install.sql:ro
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-proot_meddiet_2026"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    networks:
+      - meddiet_net_aistudio2
+
+  phpmyadmin:
+    image: phpmyadmin/phpmyadmin:latest
+    container_name: meddiet_pma_aistudio2
+    restart: unless-stopped
+    ports:
+      - "5567:80"
+    environment:
+      PMA_HOST: db
+      PMA_PORT: 3306
+      PMA_USER: meddiet_user
+      PMA_PASSWORD: meddiet_secret_2026
+      UPLOAD_LIMIT: 64M
+    depends_on:
+      - db
+    networks:
+      - meddiet_net_aistudio2
+
+networks:
+  meddiet_net_aistudio2:
+    driver: bridge
