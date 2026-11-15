@@ -20,6 +20,8 @@ docs/*
 # Registros de log y archivos temporales
 *.log
 
-# Archivos temporales de sistemas operativos
+# Archivos temporales de sistemas operativos y editores
 .DS_Store
 Thumbs.db
+*-nemo-safeBackup*
+gitignore.txt

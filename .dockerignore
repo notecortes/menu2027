@@ -1,0 +1,7 @@
+# Exclusiones del contexto de construcción de Docker (Build Context)
+data/
+.git/
+docs/
+*.log
+.DS_Store
+Thumbs.db
