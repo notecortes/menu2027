@@ -1,14 +1,25 @@
-# Datos locales de MariaDB / MySQL en Docker (evita fallos de permisos root y binarios de BD)
+# ==============================================================================
+# MedDiet Pro — Reglas de Exclusión de Git (.gitignore)
+# ==============================================================================
+
+# Credenciales privadas de hosting (NUNCA se suben a GitHub)
+config/db.local.php
+config/*.local.php
+config/credentials.php
+.env
+.env.*
+!.env.example
+
+# Datos locales de MariaDB / MySQL en Docker (evita fallos de permisos root y binarios)
 data/
 
-# Ficheros de la carpeta docs
+# Ficheros y notas de la carpeta docs
 docs/*
 !docs/.gitkeep
 
-# Archivos de entorno local y temporales
-.env
+# Registros de log y archivos temporales
 *.log
 
-# Archivos del sistema
+# Archivos temporales de sistemas operativos
 .DS_Store
 Thumbs.db

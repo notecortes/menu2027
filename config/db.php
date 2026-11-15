@@ -1,40 +1,60 @@
 <?php
 /**
- * MedDiet Pro — Configuración de Conexión a Base de Datos (PDO)
- * Compatible automáticamente con Docker (puerto 6666) y Hosting Compartido (cPanel, Plesk, Hostinger, Raiola).
+ * MedDiet Pro — Configuración y Conexión a Base de Datos (PDO Singleton)
+ * Compatible con Docker local y cualquier Hosting Compartido (cPanel, Plesk, Hostinger, Raiola, etc.).
  *
- * Para Hosting Compartido: edita únicamente las 4 constantes del bloque else.
+ * GESTIÓN DE CREDENCIALES PRIVADAS:
+ * Para evitar subir tus contraseñas privadas a GitHub:
+ * 1. Copia "config/db.local.php.example" a "config/db.local.php".
+ * 2. Escribe tus credenciales en "config/db.local.php".
+ * 3. Ese archivo está protegido en .gitignore y NUNCA se subirá a GitHub.
  */
 
 declare(strict_types=1);
 
+// 1. Cargar archivo local de credenciales privadas si existe (ignorado por Git)
+$localConfigFile = __DIR__ . '/db.local.php';
+if (file_exists($localConfigFile)) {
+    require_once $localConfigFile;
+}
+
+// 2. Detección automática de entorno Docker
 $isDocker = (getenv('DOCKER_ENV') === 'true') || (getenv('DB_HOST') === 'db');
 
-if ($isDocker) {
-    define('DB_HOST', getenv('DB_HOST') ?: 'db');
+// 3. Definición de constantes si no fueron definidas previamente en db.local.php
+if (!defined('DB_HOST')) {
+    define('DB_HOST', $isDocker ? (getenv('DB_HOST') ?: 'db') : (getenv('DB_HOST') ?: 'localhost'));
+}
+
+if (!defined('DB_NAME')) {
     define('DB_NAME', getenv('DB_NAME') ?: 'meddiet_pro');
-    define('DB_USER', getenv('DB_USER') ?: 'meddiet_user');
-    define('DB_PASS', getenv('DB_PASS') ?: 'meddiet_secret_2026');
-    define('DB_PORT', getenv('DB_PORT') ?: '3306');
-} else {
-    // =========================================================================
-    // CONFIGURACIÓN PARA SERVIDOR COMPARTIDO (cPanel / Plesk / Hostinger)
-    // Lee variables de entorno si existen, o edita directamente estas constantes:
-    // =========================================================================
-    define('DB_HOST', getenv('DB_HOST') ?: 'localhost');
-    define('DB_NAME', getenv('DB_NAME') ?: 'meddiet_pro');
-    define('DB_USER', getenv('DB_USER') ?: 'root');
-    define('DB_PASS', getenv('DB_PASS') !== false ? (string)getenv('DB_PASS') : '');
+}
+
+if (!defined('DB_USER')) {
+    define('DB_USER', $isDocker ? (getenv('DB_USER') ?: 'meddiet_user') : (getenv('DB_USER') ?: 'root'));
+}
+
+if (!defined('DB_PASS')) {
+    if ($isDocker) {
+        define('DB_PASS', getenv('DB_PASS') ?: 'meddiet_secret_2026');
+    } else {
+        define('DB_PASS', getenv('DB_PASS') !== false ? (string)getenv('DB_PASS') : '');
+    }
+}
+
+if (!defined('DB_PORT')) {
     define('DB_PORT', getenv('DB_PORT') ?: '3306');
 }
 
-define('DB_CHARSET', 'utf8mb4');
+if (!defined('DB_CHARSET')) {
+    define('DB_CHARSET', 'utf8mb4');
+}
 
 /**
  * Obtiene una instancia singleton de conexión PDO segura con consultas preparadas nativas.
  *
- * @return PDO
- * @throws PDOException
+ * @return PDO Instancia activa de conexión MySQL
+ * @throws PDOException Si las credenciales o el servidor no son accesibles
  */
 function getDbConnection(): PDO
 {
@@ -64,6 +84,10 @@ function getDbConnection(): PDO
 
 /**
  * Envía una respuesta JSON estandarizada con cabeceras UTF-8 y finaliza la ejecución.
+ *
+ * @param array<string, mixed> $payload Datos a serializar en formato JSON
+ * @param int $statusCode Código de estado HTTP (por defecto 200)
+ * @return void
  */
 function sendJsonResponse(array $payload, int $statusCode = 200): void
 {

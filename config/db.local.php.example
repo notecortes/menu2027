@@ -1,0 +1,30 @@
+<?php
+/**
+ * MedDiet Pro — Plantilla de Credenciales Privadas de Base de Datos para Hosting
+ *
+ * INSTRUCCIONES DE USO:
+ * 1. Copia este archivo con el nombre "db.local.php" dentro de la misma carpeta "config/".
+ * 2. Rellena las constantes de abajo con los datos de tu base de datos MySQL en tu hosting.
+ * 3. Este archivo ("db.local.php") está incluido en el .gitignore, por lo que NUNCA
+ *    se subirá a GitHub ni se expondrá públicamente.
+ */
+
+declare(strict_types=1);
+
+// Servidor de base de datos (normalmente 'localhost' en cPanel / Plesk / Hostinger / Raiola)
+define('DB_HOST', 'localhost');
+
+// Nombre de la base de datos asignado en tu panel de hosting
+define('DB_NAME', 'tu_base_de_datos');
+
+// Usuario de la base de datos creado en tu hosting
+define('DB_USER', 'tu_usuario_mysql');
+
+// Contraseña segura asignada a dicho usuario
+define('DB_PASS', 'tu_contrasena_secreta');
+
+// Puerto MySQL (3306 es el estándar)
+define('DB_PORT', '3306');
+
+// Codificación de caracteres (utf8mb4 para compatibilidad total con tildes y caracteres españoles)
+define('DB_CHARSET', 'utf8mb4');
