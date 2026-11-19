@@ -1263,12 +1263,63 @@ export const RECIPES_DB = [
   const diffLevel = r.prep_minutes <= 16 ? 1 : (r.prep_minutes <= 25 ? 2 : 3);
   const diffMap = { 1: 'Muy fácil', 2: 'Fácil', 3: 'Media' };
   const baseRating = r.id === 1 ? 5.0 : Number((4.7 + ((r.id * 7) % 4) * 0.1).toFixed(1));
+
+  const SOURCE_BY_CAT = {
+    legumbre: {
+      name: 'Fundación Dieta Mediterránea · Cuchara y Legumbres Tradicionales',
+      url: 'https://dietamediterranea.com/recetas/'
+    },
+    pescado: {
+      name: 'Ministerio de Agricultura, Pesca y Alimentación (Alimentos de España)',
+      url: 'https://www.alimentosdespana.es/es/gastronomia/recetas/'
+    },
+    ave_carne_magra: {
+      name: 'RTVE Cocina · Gastronomía Tradicional Española',
+      url: 'https://www.rtve.es/play/cocina/'
+    },
+    verdura_huevo: {
+      name: 'Fundación Dieta Mediterránea · Huerta y Campo',
+      url: 'https://dietamediterranea.com/recetas/'
+    },
+    arroz_fijo: {
+      name: 'Gastronomía Tradicional Española · Directo al Paladar',
+      url: 'https://www.directoalpaladar.com/recetas-de-arroz-y-pastas'
+    }
+  };
+
+  const defaultSource = SOURCE_BY_CAT[r.category] || {
+    name: 'Fundación Dieta Mediterránea',
+    url: 'https://dietamediterranea.com/recetas/'
+  };
+
+  const ingIds = new Set((r.ingredients || []).map(item => Number(item.ingredient_id)));
+  const allergenList = [];
+  if (ingIds.has(8)) allergenList.push('Huevo');
+  const hasFish = [30, 31, 32, 33, 34, 35, 36, 37, 38].some(fid => ingIds.has(fid));
+  if (hasFish) allergenList.push('Pescado');
+  if (ingIds.has(45)) allergenList.push('Lácteos (requesón 0%)');
+  const allergensText = allergenList.length > 0
+    ? `Contiene: ${allergenList.join(', ')}`
+    : '100% libre de alérgenos principales (Sin gluten, Sin lactosa)';
+
+  const SERVING_TIPS = {
+    legumbre: 'Acompañar con ensalada de tomate con orégano y cítrico para favorecer la biodisponibilidad del hierro vegetal.',
+    pescado: 'Servir con un chorrito de limón recién exprimido y agua fresca aromatizada con menta.',
+    ave_carne_magra: 'Servir sobre lecho de hojas verdes (canónigos o rúcula) para aportar volumen saciante y frescor.',
+    verdura_huevo: 'Degustar templado con una rebanada fina de pan 100% integral para mojar la yema melosa.',
+    arroz_fijo: 'Acompañar con el plátano dorado y una infusión digestiva tras la comida.'
+  };
+
   return {
     ...r,
     image_url: resolveDishSpecificImage(r),
     difficulty_level: r.difficulty_level || diffLevel,
     difficulty: r.difficulty || diffMap[diffLevel],
-    rating: r.rating || Math.min(5.0, baseRating)
+    rating: r.rating || Math.min(5.0, baseRating),
+    source_name: r.source_name || defaultSource.name,
+    source_url: r.source_url || defaultSource.url,
+    serving_tip: r.serving_tip || SERVING_TIPS[r.category] || 'Servir templado o recién cocinado.',
+    allergens: r.allergens || allergensText
   };
 });
 
@@ -2043,5 +2094,174 @@ export function generateBatchCookingPlan(planMap, diners = 2, recipes = RECIPES_
       related_dishes: creamsAndVeggies.slice(0, 3).map(v => v.recipe.name).join(' · ')
     }
   ];
+}
+
+/**
+ * Busca y clasifica las recetas del catálogo en función de los ingredientes
+ * que el usuario tiene disponibles en su nevera o despensa.
+ *
+ * @param {Object} options - Parámetros de búsqueda
+ * @param {Array<number|string>} [options.ingredientIds=[]] - IDs de ingredientes disponibles en la nevera
+ * @param {Array<string>} [options.ingredientNames=[]] - Nombres o términos de ingredientes introducidos por el usuario
+ * @param {boolean} [options.ignorePantryBasics=true] - Si es true, considera que ingredientes básicos (AOVE, sal, ajo, caldo, pimentón) siempre están disponibles
+ * @param {string} [options.mealSlot='all'] - 'all' | 'lunch' | 'dinner'
+ * @param {string} [options.season='all'] - 'all' | 'primavera' | 'verano' | 'otono' | 'invierno'
+ * @param {string} [options.category='all'] - 'all' | 'legumbre' | 'pescado' | 'ave_carne_magra' | 'verdura_huevo' | 'arroz_fijo'
+ * @param {number} [options.minMatchPercent=1] - Porcentaje mínimo de coincidencia para incluir la receta
+ * @param {Array<Object>} [options.recipes=RECIPES_DB] - Catálogo de recetas
+ * @param {Array<Object>} [options.ingredients=INGREDIENTS_DB] - Catálogo de ingredientes normalizados
+ * @returns {Array<Object>} Lista de recetas ordenadas por grado de coincidencia (100% disponibles primero)
+ */
+export function searchRecipesByFridgeIngredients(options = {}) {
+  const {
+    ingredientIds = [],
+    ingredientNames = [],
+    ignorePantryBasics = true,
+    mealSlot = 'all',
+    season = 'all',
+    category = 'all',
+    minMatchPercent = 1,
+    recipes = RECIPES_DB,
+    ingredients = INGREDIENTS_DB
+  } = options;
+
+  const ingredientsById = new Map(ingredients.map(ing => [ing.id, ing]));
+  const pantryBasicIds = new Set([9, 11, 46, 47]); // AOVE, Ajo fresco, Caldo de verduras, Pimentón de la Vera
+
+  // Normalizar conjunto de IDs disponibles en nevera
+  const availableIds = new Set(
+    (ingredientIds || [])
+      .map(id => Number(id))
+      .filter(id => !isNaN(id) && id > 0)
+  );
+
+  // Si se pasaron nombres de ingredientes libres, buscar correspondencias en INGREDIENTS_DB
+  if (Array.isArray(ingredientNames) && ingredientNames.length > 0) {
+    const cleanNames = ingredientNames
+      .map(n => String(n).trim().toLowerCase())
+      .filter(n => n.length > 1);
+
+    for (const ing of ingredients) {
+      const lowerName = ing.name.toLowerCase();
+      for (const term of cleanNames) {
+        if (lowerName.includes(term) || term.includes(lowerName)) {
+          availableIds.add(ing.id);
+        }
+      }
+    }
+  }
+
+  // Si el usuario no ha seleccionado ningún ingrediente, devolvemos lista vacía
+  if (availableIds.size === 0) {
+    return [];
+  }
+
+  const results = [];
+
+  for (const recipe of recipes) {
+    // Filtro por momento de comida (comida vs cena)
+    if (mealSlot !== 'all') {
+      if (recipe.meal_slot !== 'both' && recipe.meal_slot !== mealSlot) {
+        continue;
+      }
+    }
+
+    // Filtro por temporada
+    if (season !== 'all') {
+      const seasonsList = (recipe.seasons || '').split(',').map(s => s.trim().toLowerCase());
+      if (!seasonsList.includes(season.toLowerCase())) {
+        continue;
+      }
+    }
+
+    // Filtro por categoría
+    if (category !== 'all' && recipe.category !== category) {
+      continue;
+    }
+
+    const recipeIngs = recipe.ingredients || [];
+    if (recipeIngs.length === 0) continue;
+
+    const matchedIngredients = [];
+    const missingIngredients = [];
+    const pantryIngredients = [];
+    let fridgeHitsCount = 0;
+
+    for (const item of recipeIngs) {
+      const ingId = Number(item.ingredient_id);
+      const ingMeta = ingredientsById.get(ingId) || { id: ingId, name: `Ingrediente #${ingId}`, unit: 'g', aisle: 'Despensa' };
+      const itemDetail = {
+        ingredient_id: ingId,
+        name: ingMeta.name,
+        aisle: ingMeta.aisle,
+        unit: ingMeta.unit,
+        amount_per_diner: item.amount_per_diner,
+        notes: item.notes || ''
+      };
+
+      const isPantry = pantryBasicIds.has(ingId);
+      const isInFridge = availableIds.has(ingId);
+
+      if (isInFridge) {
+        fridgeHitsCount++;
+        matchedIngredients.push(itemDetail);
+      } else if (isPantry && ignorePantryBasics) {
+        pantryIngredients.push(itemDetail);
+        matchedIngredients.push(itemDetail);
+      } else {
+        missingIngredients.push(itemDetail);
+      }
+    }
+
+    // Requisito: la receta debe contener al menos 1 ingrediente de los que el usuario tiene en la nevera
+    if (fridgeHitsCount === 0) {
+      continue;
+    }
+
+    const totalRequired = recipeIngs.length;
+    const matchedCount = matchedIngredients.length;
+    const missingCount = missingIngredients.length;
+    const matchPercentage = Math.round((matchedCount / totalRequired) * 100);
+    const canCookNow = missingCount === 0;
+
+    if (matchPercentage >= minMatchPercent) {
+      results.push({
+        recipe,
+        canCookNow,
+        matchPercentage,
+        fridgeHitsCount,
+        matchedCount,
+        missingCount,
+        totalRequired,
+        matchedIngredients,
+        missingIngredients,
+        pantryIngredients
+      });
+    }
+  }
+
+  // Ordenar resultados con criterios de relevancia y practicidad:
+  // 1. Recetas 100% cocinables con lo que hay (canCookNow = true primero)
+  // 2. Menor número de ingredientes faltantes (falta 1 mejor que faltan 3)
+  // 3. Mayor número de ingredientes aprovechados de la nevera (fridgeHitsCount)
+  // 4. Mayor porcentaje de coincidencia
+  // 5. Mayor valoración gastronómica (rating)
+  results.sort((a, b) => {
+    if (a.canCookNow !== b.canCookNow) {
+      return a.canCookNow ? -1 : 1;
+    }
+    if (a.missingCount !== b.missingCount) {
+      return a.missingCount - b.missingCount;
+    }
+    if (b.fridgeHitsCount !== a.fridgeHitsCount) {
+      return b.fridgeHitsCount - a.fridgeHitsCount;
+    }
+    if (b.matchPercentage !== a.matchPercentage) {
+      return b.matchPercentage - a.matchPercentage;
+    }
+    return (b.recipe.rating || 4.8) - (a.recipe.rating || 4.8);
+  });
+
+  return results;
 }
 

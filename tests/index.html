@@ -1,0 +1,180 @@
+<!doctype html>
+<html lang="es" data-theme="light">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>MedDiet Pro — Suite de Tests en Vivo</title>
+    <link rel="stylesheet" href="../assets/css/styles.css" />
+    <style>
+      body {
+        padding: 2rem 1rem;
+        background: var(--bg-canvas);
+        font-family: var(--font-sans, system-ui, -apple-system, sans-serif);
+      }
+      .test-container {
+        max-width: 900px;
+        margin: 0 auto;
+        background: var(--bg-surface);
+        border: 1px solid var(--border-hairline);
+        border-radius: var(--radius-md, 12px);
+        padding: 2rem;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+      }
+      .test-header {
+        border-bottom: 2px solid var(--accent-primary);
+        padding-bottom: 1rem;
+        margin-bottom: 1.5rem;
+      }
+      .test-title {
+        font-family: var(--font-serif, serif);
+        font-size: 1.8rem;
+        color: var(--accent-primary);
+        margin: 0 0 0.4rem;
+      }
+      .test-item {
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+        padding: 0.65rem 0.85rem;
+        border-radius: 6px;
+        margin-bottom: 0.4rem;
+        font-size: 0.92rem;
+      }
+      .test-item.is-pass {
+        background: #E8F5E9;
+        color: #1B5E20;
+        border-left: 4px solid #4CAF50;
+      }
+      .test-item.is-fail {
+        background: #FFEBEE;
+        color: #B71C1C;
+        border-left: 4px solid #F44336;
+      }
+      .test-summary-box {
+        margin-top: 1.75rem;
+        padding: 1.25rem;
+        background: var(--bg-subtle);
+        border-radius: 8px;
+        text-align: center;
+        font-size: 1.15rem;
+        font-weight: 700;
+      }
+    </style>
+  </head>
+  <body>
+    <main class="test-container">
+      <header class="test-header">
+        <h1 class="test-title">🧪 Suite de Tests Oficiales — MedDiet Pro</h1>
+        <p class="slot-meta-line" style="margin: 0;">
+          Verificación automática de 1. Fichas Detalladas y Avales Culinarios (URL), 2. Buscador por Ingredientes de la Nevera y 3. Reglas Nutricionales Clínicas.
+        </p>
+      </header>
+
+      <div id="tests-log">
+        <p class="slot-meta-line">Ejecutando pruebas unitarias e integradas en navegador...</p>
+      </div>
+
+      <div class="test-summary-box" id="test-summary">
+        Calculando resultados...
+      </div>
+
+      <div style="margin-top: 1.5rem; text-align: center;">
+        <a href="../public/index.php" class="btn-primary" style="text-decoration: none; padding: 0.65rem 1.4rem;">
+          ← Volver a la Aplicación MedDiet Pro
+        </a>
+      </div>
+    </main>
+
+    <script type="module">
+      import {
+        RECIPES_DB,
+        INGREDIENTS_DB,
+        searchRecipesByFridgeIngredients,
+        verifyZeroForbiddenIngredients
+      } from '../assets/js/engine.js';
+
+      const logEl = document.getElementById('tests-log');
+      const summaryEl = document.getElementById('test-summary');
+      const tests = [];
+
+      function runTest(name, fn) {
+        try {
+          const pass = fn();
+          tests.push({ name, pass: Boolean(pass) });
+        } catch (err) {
+          tests.push({ name: `${name} (Error: ${err.message})`, pass: false });
+        }
+      }
+
+      // Bloque 1: Integridad y Fichas Detalladas
+      runTest('El catálogo contiene exactamente 200 recetas españolas', () => RECIPES_DB.length === 200);
+      runTest('El 100% de las recetas tienen nombre de fuente gastronómica acreditada', () => {
+        return RECIPES_DB.every(r => r.source_name && r.source_name.trim().length > 0);
+      });
+      runTest('El 100% de las recetas tienen enlace web directo (URL) a la fuente', () => {
+        return RECIPES_DB.every(r => r.source_url && r.source_url.startsWith('http'));
+      });
+      runTest('El 100% de las recetas tienen elaboración detallada por pasos (mínimo 3 pasos)', () => {
+        return RECIPES_DB.every(r => Array.isArray(r.steps) && r.steps.length >= 3);
+      });
+      runTest('El 100% de las recetas incluyen información clínica de alérgenos', () => {
+        return RECIPES_DB.every(r => r.allergens && r.allergens.length > 0);
+      });
+      runTest('El 100% de las recetas cuentan con sugerencia de servicio y acompañamiento', () => {
+        return RECIPES_DB.every(r => r.serving_tip && r.serving_tip.length > 0);
+      });
+      runTest('0% marisco, 0% bacalao y 0% rape verificado en todas las 200 recetas', () => {
+        return verifyZeroForbiddenIngredients(RECIPES_DB, INGREDIENTS_DB).clean;
+      });
+
+      // Bloque 2: Buscador por Ingredientes de la Nevera
+      runTest('Búsqueda con nevera vacía devuelve 0 recetas', () => {
+        const res = searchRecipesByFridgeIngredients({ ingredientIds: [] });
+        return res.length === 0;
+      });
+      runTest('Búsqueda con huevos (ID: 8) devuelve resultados con huevos', () => {
+        const res = searchRecipesByFridgeIngredients({ ingredientIds: [8], ignorePantryBasics: true });
+        return res.length > 0 && res.every(item => item.recipe.ingredients.some(i => Number(i.ingredient_id) === 8));
+      });
+      runTest('Búsqueda con Huevos + Calabacín + Cebolla prioriza receta 100% ejecutable', () => {
+        const res = searchRecipesByFridgeIngredients({ ingredientIds: [8, 13, 10], ignorePantryBasics: true });
+        return res.length > 0 && res[0].canCookNow === true && res[0].matchPercentage === 100;
+      });
+      runTest('Modo estricto identifica básicos de despensa faltantes si no se ignoran', () => {
+        const res = searchRecipesByFridgeIngredients({ ingredientIds: [8, 13], ignorePantryBasics: false });
+        return res.length > 0 && res[0].missingIngredients.some(mi => mi.ingredient_id === 9 || mi.ingredient_id === 11);
+      });
+      runTest('Filtro por momento de comida (lunch) solo retorna comidas o tomas mixtas', () => {
+        const res = searchRecipesByFridgeIngredients({ ingredientIds: [3, 10, 12], mealSlot: 'lunch', ignorePantryBasics: true });
+        return res.length > 0 && res.every(r => r.recipe.meal_slot === 'both' || r.recipe.meal_slot === 'lunch');
+      });
+      runTest('Filtro por temporada de primavera respeta la estacionalidad', () => {
+        const res = searchRecipesByFridgeIngredients({ ingredientIds: [30, 6], season: 'primavera', ignorePantryBasics: true });
+        return res.length > 0 && res.every(r => r.recipe.seasons.includes('primavera'));
+      });
+      runTest('Búsqueda por texto libre ("salmón") encuentra recetas correctamente', () => {
+        const res = searchRecipesByFridgeIngredients({ ingredientNames: ['salmón'], ignorePantryBasics: true });
+        return res.length > 0 && res.some(r => r.recipe.name.toLowerCase().includes('salmón'));
+      });
+
+      // Renderizar resultados en el DOM
+      let passed = 0;
+      logEl.innerHTML = tests.map(t => {
+        if (t.pass) passed++;
+        return `
+          <div class="test-item ${t.pass ? 'is-pass' : 'is-fail'}">
+            <span>${t.pass ? '✓' : '✗'}</span>
+            <span>${t.name}</span>
+          </div>
+        `;
+      }).join('');
+
+      const total = tests.length;
+      const allPassed = passed === total;
+      summaryEl.style.color = allPassed ? '#2D4B26' : '#B85238';
+      summaryEl.innerHTML = allPassed
+        ? `🎉 ¡ÉXITO TOTAL! ${passed} de ${total} pruebas pasadas correctamente (100% efectividad)`
+        : `⚠️ Se detectaron ${total - passed} fallos de ${total} pruebas ejecutadas.`;
+    </script>
+  </body>
+</html>

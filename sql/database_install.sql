@@ -32,6 +32,8 @@ CREATE TABLE `recipes` (
   `cooking_method` VARCHAR(60) NOT NULL,
   `image_url` VARCHAR(255) NOT NULL,
   `youtube_url` VARCHAR(255) NOT NULL,
+  `source_name` VARCHAR(120) NOT NULL DEFAULT 'Fundación Dieta Mediterránea',
+  `source_url` VARCHAR(255) NOT NULL DEFAULT 'https://dietamediterranea.com/recetas/',
   `chef_tip` TEXT NOT NULL,
   `batch_prep_tip` TEXT NOT NULL,
   `is_friday_fixed` TINYINT(1) NOT NULL DEFAULT 0,

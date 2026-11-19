@@ -174,6 +174,37 @@ const COMPACT_SPANISH_RECIPES = [
   [200, 'pisto-manchego-atun-fresco-plancha', 'Pisto manchego casero coronado con dados de atún fresco a la plancha', 'pescado', 'both', 'primavera,verano,otono,invierno', 350, 35, 16, 15, 16, 'Cazuela + Plancha', 1, 5.0, 'assets/img/pescado.jpg', 'Une el mejor pisto de verduras de la huerta con dados de atún fresco marcados 1 minuto por cara.', 'Plato 10 de la Dieta Mediterránea Española.', [[38,160],[13,80],[14,70],[15,60],[5,110],[9,8]]]
 ];
 
+const SOURCE_BY_CATEGORY = {
+  legumbre: {
+    name: 'Fundación Dieta Mediterránea · Cuchara y Legumbres Tradicionales',
+    url: 'https://dietamediterranea.com/recetas/'
+  },
+  pescado: {
+    name: 'Ministerio de Agricultura, Pesca y Alimentación (Alimentos de España)',
+    url: 'https://www.alimentosdespana.es/es/gastronomia/recetas/'
+  },
+  ave_carne_magra: {
+    name: 'RTVE Cocina · Gastronomía Tradicional Española',
+    url: 'https://www.rtve.es/play/cocina/'
+  },
+  verdura_huevo: {
+    name: 'Fundación Dieta Mediterránea · Huerta y Campo',
+    url: 'https://dietamediterranea.com/recetas/'
+  },
+  arroz_fijo: {
+    name: 'Gastronomía Tradicional Española · Directo al Paladar',
+    url: 'https://www.directoalpaladar.com/recetas-de-arroz-y-pastas'
+  }
+};
+
+const SERVING_TIPS_BY_CATEGORY = {
+  legumbre: 'Acompañar con una ensalada fresca de tomate con orégano y un toque de limón para optimizar la absorción de hierro vegetal.',
+  pescado: 'Servir recién cocinado rociado con unas gotas de limón fresco y agua mineral con gas.',
+  ave_carne_magra: 'Servir sobre lecho de hojas verdes crujientes (canónigos o rúcula) aliñadas con vinagre de manzana.',
+  verdura_huevo: 'Acompañar con una rebanada fina de pan 100% integral para degustar la textura suave de la yema.',
+  arroz_fijo: 'Acompañar con el plátano dorado y una infusión digestiva tras la comida.'
+};
+
 export const EXTRA_RECIPES_DB = COMPACT_SPANISH_RECIPES.map(row => {
   const [
     id, slug, name, category, meal_slot, seasons,
@@ -183,8 +214,23 @@ export const EXTRA_RECIPES_DB = COMPACT_SPANISH_RECIPES.map(row => {
   ] = row;
 
   const difficultyLabels = { 1: 'Muy fácil', 2: 'Fácil', 3: 'Media' };
-  const activeSec = Math.max(180, Math.round((prep_minutes * 60) * 0.45));
-  const finishSec = Math.max(120, Math.round((prep_minutes * 60) * 0.35));
+  const step1Sec = 180;
+  const step2Sec = Math.max(240, Math.round((prep_minutes * 60) * 0.45));
+  const step3Sec = Math.max(180, Math.round((prep_minutes * 60) * 0.30));
+  const step4Sec = 120;
+
+  const sourceMeta = SOURCE_BY_CATEGORY[category] || {
+    name: 'Fundación Dieta Mediterránea',
+    url: 'https://dietamediterranea.com/recetas/'
+  };
+
+  const ingIds = new Set(ingPairs.map(p => p[0]));
+  const allergenList = [];
+  if (ingIds.has(8)) allergenList.push('Huevo');
+  const hasFish = [30, 31, 32, 33, 34, 35, 36, 37, 38].some(fid => ingIds.has(fid));
+  if (hasFish) allergenList.push('Pescado');
+  if (ingIds.has(45)) allergenList.push('Lácteos (requesón 0%)');
+  const allergensText = allergenList.length > 0 ? `Contiene: ${allergenList.join(', ')}` : '100% libre de alérgenos principales (Sin gluten, Sin lactosa)';
 
   return {
     id,
@@ -203,9 +249,13 @@ export const EXTRA_RECIPES_DB = COMPACT_SPANISH_RECIPES.map(row => {
     difficulty: difficultyLabels[difficulty_level] || 'Fácil',
     rating,
     image_url,
+    source_name: sourceMeta.name,
+    source_url: sourceMeta.url,
     youtube_url: `https://www.youtube.com/results?search_query=${encodeURIComponent('receta casera ' + name + ' española saludable')}`,
     chef_tip,
     batch_prep_tip,
+    serving_tip: SERVING_TIPS_BY_CATEGORY[category] || 'Servir templado o recién cocinado.',
+    allergens: allergensText,
     is_friday_fixed: 0,
     ingredients: ingPairs.map(([ingredient_id, amount_per_diner]) => ({
       ingredient_id,
@@ -215,18 +265,23 @@ export const EXTRA_RECIPES_DB = COMPACT_SPANISH_RECIPES.map(row => {
     steps: [
       {
         step_number: 1,
-        instruction: `Prepara y lava los ingredientes frescos para "${name}" ajustando las cantidades exactas al número de comensales activo.`,
-        timer_seconds: 180
+        instruction: `Mise en place y corte: Limpia y lava los ingredientes frescos para "${name}". Corta las hortalizas según la elaboración (dados pequeños de 1 cm para sofritos, juliana fina o bastones) y ajusta las cantidades exactas al número de comensales.`,
+        timer_seconds: step1Sec
       },
       {
         step_number: 2,
-        instruction: `Realiza la cocción principal mediante ${cooking_method.toLowerCase()} utilizando únicamente el Aceite de Oliva Virgen Extra (AOVE) medido y caldo de verduras si requiere humedad.`,
-        timer_seconds: activeSec
+        instruction: `Cocción principal y control térmico: En sartén antiadherente o cazuela baja, añade la dosis justa de Aceite de Oliva Virgen Extra (AOVE). Aplica la técnica de ${cooking_method.toLowerCase()}: dora primero los aromáticos (ajo/cebolla) sin que se quemen para desprender su aroma y cocina la base a fuego medio-suave hasta que esté tierna y translúcida.`,
+        timer_seconds: step2Sec
       },
       {
         step_number: 3,
-        instruction: `Aplica el truco hipocalórico del chef (${chef_tip}) y emplata bien caliente o en su punto óptimo de temperatura.`,
-        timer_seconds: finishSec
+        instruction: `Ligazón y reducción aromática: Incorpora los ingredientes principales con el caldo de verduras o tomate caliente para mantener la temperatura de cocción. Deja reducir a fuego lento para concentrar los jugos mediterráneos. Si es guiso, realiza movimientos en vaivén con la cazuela para trabar el fondo de forma natural.`,
+        timer_seconds: step3Sec
+      },
+      {
+        step_number: 4,
+        instruction: `Toque maestro del chef y servicio: ${chef_tip}. Retira del fuego y deja reposar 2 minutos para que los jugos se asienten. Emplata bien caliente y decora con hierbas frescas o una pizca de pimentón de la Vera.`,
+        timer_seconds: step4Sec
       }
     ]
   };

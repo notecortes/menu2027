@@ -1667,3 +1667,170 @@ a:focus-visible {
   }
 }
 
+/* ==========================================================================
+   BUSCADOR DE APROVECHAMIENTO: ¿QUÉ TENGO EN LA NEVERA?
+   ========================================================================== */
+.fridge-quick-panel {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-hairline);
+  border-radius: var(--radius-md);
+  padding: 1.25rem 1.4rem;
+  margin-bottom: 1.4rem;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+}
+
+.fridge-group-title {
+  font-size: 0.82rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+  margin-bottom: 0.5rem;
+}
+
+.fridge-chips-wrap {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  margin-bottom: 1rem;
+}
+
+.fridge-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.38rem 0.75rem;
+  font-size: 0.85rem;
+  font-family: inherit;
+  font-weight: 500;
+  color: var(--text-secondary);
+  background: var(--bg-subtle);
+  border: 1px solid var(--border-hairline);
+  border-radius: 9999px;
+  cursor: pointer;
+  transition: all 140ms ease;
+  user-select: none;
+}
+
+.fridge-chip:hover {
+  background: var(--bg-canvas);
+  border-color: var(--border-strong);
+  color: var(--text-primary);
+}
+
+.fridge-chip.is-active {
+  background: var(--accent-primary);
+  border-color: var(--accent-primary);
+  color: #FFFFFF;
+  font-weight: 600;
+  box-shadow: 0 1px 4px rgba(58, 95, 50, 0.25);
+}
+
+.fridge-selected-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.75rem 1rem;
+  background: var(--accent-primary-soft);
+  border-radius: var(--radius-sm);
+  margin-top: 0.75rem;
+}
+
+.fridge-selected-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  background: var(--bg-surface);
+  border: 1px solid var(--accent-primary);
+  color: var(--accent-primary);
+  font-size: 0.82rem;
+  font-weight: 600;
+  padding: 0.25rem 0.55rem;
+  border-radius: var(--radius-sm);
+}
+
+.fridge-selected-tag button {
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  color: var(--accent-terracotta);
+  font-size: 0.95rem;
+  line-height: 1;
+  padding: 0 0.15rem;
+  font-weight: bold;
+}
+
+.fridge-badge {
+  display: inline-block;
+  padding: 0.3rem 0.65rem;
+  border-radius: var(--radius-sm);
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.fridge-badge.is-full {
+  background: #E8F5E9;
+  color: #1B5E20;
+  border: 1px solid #A5D6A7;
+}
+
+.fridge-badge.is-partial {
+  background: #FFF8E1;
+  color: #B78103;
+  border: 1px solid #FFE082;
+}
+
+.fridge-missing-line {
+  font-size: 0.78rem;
+  color: var(--accent-terracotta);
+  margin-top: 0.35rem;
+  font-weight: 500;
+}
+
+.fridge-match-pill {
+  display: inline-block;
+  font-size: 0.75rem;
+  padding: 0.15rem 0.45rem;
+  border-radius: 4px;
+  background: #EBF1E8;
+  color: #2D4B26;
+  margin-right: 0.25rem;
+  margin-bottom: 0.25rem;
+}
+
+.fridge-missing-pill {
+  display: inline-block;
+  font-size: 0.75rem;
+  padding: 0.15rem 0.45rem;
+  border-radius: 4px;
+  background: #F9ECE8;
+  color: #B85238;
+  margin-right: 0.25rem;
+  margin-bottom: 0.25rem;
+}
+
+.recipe-source-badge {
+  margin-top: 0.85rem;
+  padding: 0.75rem 1rem;
+  background: var(--bg-subtle);
+  border-radius: var(--radius-sm);
+  border-left: 3px solid var(--accent-primary);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.recipe-source-badge a {
+  text-decoration: none;
+  font-weight: 600;
+  color: var(--accent-primary);
+}
+
+.recipe-source-badge a:hover {
+  text-decoration: underline;
+}
+

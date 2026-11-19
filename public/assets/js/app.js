@@ -22,7 +22,8 @@ import {
   getCompatibleAlternatives,
   generateSeasonalWeeklyPlan,
   aggregateShoppingList,
-  generateBatchCookingPlan
+  generateBatchCookingPlan,
+  searchRecipesByFridgeIngredients
 } from './engine.js';
 
 const STORAGE_KEYS = {
@@ -36,7 +37,8 @@ const STORAGE_KEYS = {
   CHECKED_ITEMS: 'meddiet_checked_shopping_v1',
   LOCKED_SLOTS: 'meddiet_locked_slots_v1',
   CUSTOM_SHOPPING: 'meddiet_custom_shopping_v1',
-  CLINICAL_PROFILE: 'meddiet_clinical_profile_v1'
+  CLINICAL_PROFILE: 'meddiet_clinical_profile_v1',
+  FRIDGE_INGREDIENTS: 'meddiet_fridge_ingredients_v1'
 };
 
 // Ingredientes básicos de despensa que suelen tenerse en casa
@@ -44,7 +46,7 @@ const PANTRY_BASIC_INGREDIENT_IDS = new Set([9, 11, 46, 47]);
 
 const state = {
   theme: localStorage.getItem(STORAGE_KEYS.THEME) || 'light',
-  activeView: 'planner', // 'planner' | 'catalog' | 'shopping' | 'batch'
+  activeView: 'planner', // 'planner' | 'catalog' | 'fridge' | 'shopping' | 'batch'
   season: localStorage.getItem(STORAGE_KEYS.SEASON) || 'primavera',
   diners: Math.max(1, Math.min(12, parseInt(localStorage.getItem(STORAGE_KEYS.DINERS) || '2', 10))),
   selectedMobileDay: 'lunes',
@@ -60,6 +62,11 @@ const state = {
   customShoppingItems: loadStoredCustomShopping(),
   hidePantryBasics: false,
   clinicalProfile: loadStoredClinicalProfile(),
+  fridgeIngredients: loadStoredFridgeIngredients(),
+  fridgeIgnorePantry: true,
+  fridgeMealSlotFilter: 'all',
+  fridgeSeasonFilter: 'all',
+  slottingFridgeRecipeId: null,
   planMap: null,
   savedMenus: loadStoredSavedMenus(),
   checkedIngredients: loadCheckedIngredients(),
@@ -201,6 +208,22 @@ function loadCheckedIngredients() {
 
 function saveCheckedIngredients() {
   localStorage.setItem(STORAGE_KEYS.CHECKED_ITEMS, JSON.stringify(state.checkedIngredients));
+}
+
+function loadStoredFridgeIngredients() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEYS.FRIDGE_INGREDIENTS);
+    if (raw) {
+      const arr = JSON.parse(raw);
+      if (Array.isArray(arr) && arr.length > 0) return new Set(arr);
+    }
+  } catch (_) {}
+  // Ingredientes habituales predeterminados para inspirar: Huevos (8), Tomate (6), Calabacín (13)
+  return new Set([8, 6, 13]);
+}
+
+function saveFridgeIngredients() {
+  localStorage.setItem(STORAGE_KEYS.FRIDGE_INGREDIENTS, JSON.stringify(Array.from(state.fridgeIngredients)));
 }
 
 function loadStoredLockedSlots() {
@@ -375,6 +398,8 @@ function switchView(viewName) {
     renderPlannerView();
   } else if (viewName === 'catalog') {
     renderCatalogView();
+  } else if (viewName === 'fridge') {
+    renderFridgeView();
   } else if (viewName === 'shopping') {
     renderShoppingListView();
   } else if (viewName === 'batch') {
@@ -1116,6 +1141,26 @@ function openRecipeDetailModal(recipeId) {
           <p class="chef-tip-text">${escapeHtml(recipe.chef_tip)}</p>
         </div>
 
+        <div class="recipe-source-badge">
+          <div>
+            <span class="slot-meta-line" style="display: block; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); font-weight: 700;">Fuente y Aval Gastronómico:</span>
+            <strong style="color: var(--text-primary); font-size: 0.88rem;">${escapeHtml(recipe.source_name || 'Fundación Dieta Mediterránea')}</strong>
+          </div>
+          ${recipe.source_url ? `
+            <a href="${recipe.source_url}" target="_blank" rel="noopener noreferrer" class="btn-secondary" style="font-size: 0.78rem; padding: 0.35rem 0.65rem;" title="Consultar receta original en ${escapeHtml(recipe.source_name)}">
+              Ver en fuente original ↗
+            </a>
+          ` : ''}
+        </div>
+
+        <div style="margin-top: 0.65rem; padding: 0.55rem 0.8rem; background: var(--bg-canvas); border: 1px dashed var(--border-hairline); border-radius: var(--radius-sm); font-size: 0.82rem;">
+          <strong>💡 Sugerencia de Servicio:</strong> ${escapeHtml(recipe.serving_tip || 'Servir templado o recién preparado.')}
+        </div>
+
+        <div style="margin-top: 0.45rem; margin-bottom: 0.75rem; font-size: 0.78rem; color: var(--text-muted);">
+          🛡️ <strong>Alérgenos e información clínica:</strong> ${escapeHtml(recipe.allergens || 'Sin gluten')}
+        </div>
+
         <div style="display: flex; flex-wrap: wrap; gap: 0.65rem;">
           <button type="button" class="btn-primary" data-start-cooking="${recipe.id}">
             Abrir Modo Cocina (Temporizador)
@@ -1383,6 +1428,308 @@ function renderCatalogView() {
       </article>
     `;
   }).join('');
+}
+
+/**
+ * Renderiza la vista interactiva "¿Qué tengo en la nevera?" (Buscador de Aprovechamiento).
+ * Permite seleccionar ingredientes rápidos o buscar en el catálogo, calcula las coincidencias
+ * exactas y permite asignar la receta resultante a cualquier hueco del menú semanal.
+ */
+function renderFridgeView() {
+  const container = document.getElementById('view-fridge');
+  if (!container) return;
+
+  const proteinChipsEl = document.getElementById('fridge-protein-chips');
+  const veggieChipsEl = document.getElementById('fridge-veggie-chips');
+  const grainChipsEl = document.getElementById('fridge-grain-chips');
+  const datalistEl = document.getElementById('fridge-ingredients-datalist');
+  const selectedTagsEl = document.getElementById('fridge-selected-tags');
+  const resultsGridEl = document.getElementById('fridge-results-grid');
+  const resultsTitleEl = document.getElementById('fridge-results-title');
+  const resultsCountEl = document.getElementById('fridge-results-count');
+  const ignorePantryCb = document.getElementById('fridge-ignore-pantry-checkbox');
+  const slotFilterEl = document.getElementById('fridge-slot-filter');
+  const seasonFilterEl = document.getElementById('fridge-season-filter');
+
+  if (ignorePantryCb) ignorePantryCb.checked = state.fridgeIgnorePantry;
+  if (slotFilterEl) slotFilterEl.value = state.fridgeMealSlotFilter;
+  if (seasonFilterEl) seasonFilterEl.value = state.fridgeSeasonFilter;
+
+  // Llenar datalist si está vacío
+  if (datalistEl && datalistEl.children.length === 0) {
+    datalistEl.innerHTML = INGREDIENTS_DB.map(ing => `<option value="${escapeHtml(ing.name)}"></option>`).join('');
+  }
+
+  // Grupos rápidos de ingredientes habituales
+  const PROTEIN_IDS = [39, 8, 30, 33, 40, 38, 44, 45]; // Pollo, Huevo, Merluza, Salmón, Pavo, Atún, Jamón, Requesón
+  const VEGGIE_IDS = [6, 13, 10, 11, 15, 16, 12, 20, 17, 23, 14, 25, 21, 19, 24, 22]; // Tomate, Calabacín, Cebolla, Ajo, Pimientos, Zanahoria, Patata, etc.
+  const GRAIN_IDS = [1, 2, 3, 4, 5, 48]; // Arroz, Lentejas, Garbanzos, Alubias, Tomate triturado, Piquillos
+
+  const ingMap = new Map(INGREDIENTS_DB.map(i => [i.id, i]));
+
+  const renderChipGroup = (ids, targetEl) => {
+    if (!targetEl) return;
+    targetEl.innerHTML = ids.map(id => {
+      const ing = ingMap.get(id);
+      if (!ing) return '';
+      const isSelected = state.fridgeIngredients.has(id);
+      return `
+        <button
+          type="button"
+          class="fridge-chip ${isSelected ? 'is-active' : ''}"
+          data-toggle-fridge-id="${id}"
+          aria-pressed="${isSelected}"
+        >
+          <span>${isSelected ? '✓ ' : '+ '}</span>
+          <span>${escapeHtml(ing.name.split(' (')[0].split(' - ')[0])}</span>
+        </button>
+      `;
+    }).join('');
+  };
+
+  renderChipGroup(PROTEIN_IDS, proteinChipsEl);
+  renderChipGroup(VEGGIE_IDS, veggieChipsEl);
+  renderChipGroup(GRAIN_IDS, grainChipsEl);
+
+  // Renderizar etiquetas seleccionadas
+  if (selectedTagsEl) {
+    const selectedArr = Array.from(state.fridgeIngredients);
+    if (selectedArr.length === 0) {
+      selectedTagsEl.innerHTML = '<span class="slot-meta-line" style="font-style: italic;">Ninguno seleccionado. Pulsa sobre los botones de arriba o escribe para añadir lo que tienes en el frigorífico.</span>';
+    } else {
+      selectedTagsEl.innerHTML = selectedArr.map(id => {
+        const ing = ingMap.get(id);
+        const name = ing ? ing.name.split(' (')[0] : `Ingrediente #${id}`;
+        return `
+          <span class="fridge-selected-tag">
+            ${escapeHtml(name)}
+            <button type="button" data-remove-fridge-id="${id}" aria-label="Eliminar ${escapeHtml(name)}">✕</button>
+          </span>
+        `;
+      }).join('');
+    }
+  }
+
+  // Ejecutar búsqueda con engine.js
+  const results = searchRecipesByFridgeIngredients({
+    ingredientIds: Array.from(state.fridgeIngredients),
+    ignorePantryBasics: state.fridgeIgnorePantry,
+    mealSlot: state.fridgeMealSlotFilter,
+    season: state.fridgeSeasonFilter,
+    recipes: RECIPES_DB,
+    ingredients: INGREDIENTS_DB
+  });
+
+  const fullMatchesCount = results.filter(r => r.canCookNow).length;
+
+  if (resultsCountEl) {
+    resultsCountEl.textContent = `${results.length} recetas (${fullMatchesCount} listas para cocinar ya)`;
+  }
+  if (resultsTitleEl) {
+    resultsTitleEl.textContent = fullMatchesCount > 0
+      ? `¡Tienes ${fullMatchesCount} receta(s) 100% listas para cocinar sin comprar nada!`
+      : 'Recetas mediterráneas recomendadas según tus ingredientes';
+  }
+
+  if (!resultsGridEl) return;
+
+  if (results.length === 0) {
+    resultsGridEl.innerHTML = `
+      <div class="empty-state-card" style="grid-column: 1 / -1; padding: 2.5rem 1.5rem; text-align: center; background: var(--bg-surface); border: 1px dashed var(--border-hairline); border-radius: var(--radius-md);">
+        <p style="font-size: 1.1rem; font-weight: 600; color: var(--text-primary); margin-bottom: 0.5rem;">
+          No hay recetas que coincidan con la combinación seleccionada
+        </p>
+        <p class="slot-meta-line" style="max-width: 520px; margin: 0 auto 1.25rem;">
+          Prueba a seleccionar ingredientes adicionales comunes (como huevos, tomate, calabacín o pechuga de pollo) o asegúrate de que la casilla de básicos de despensa esté marcada.
+        </p>
+      </div>
+    `;
+    return;
+  }
+
+  resultsGridEl.innerHTML = results.map(item => {
+    const r = item.recipe;
+    const isFav = isFavoriteRecipe(r.id);
+
+    // Badges de ingredientes disponibles vs faltantes
+    const matchedPills = item.matchedIngredients.map(mi => `<span class="fridge-match-pill" title="Disponible en nevera">✓ ${escapeHtml(mi.name.split(' (')[0])}</span>`).join('');
+    const missingPills = item.missingIngredients.map(mi => `<span class="fridge-missing-pill" title="Te falta este ingrediente">✕ Falta: ${escapeHtml(mi.name.split(' (')[0])}</span>`).join('');
+
+    return `
+      <article class="recipe-card" data-recipe-id="${r.id}" style="display: flex; flex-direction: column;">
+        <div class="recipe-card-media" style="position: relative;">
+          <button
+            type="button"
+            class="fav-star-btn ${isFav ? 'is-fav' : ''}"
+            style="position: absolute; top: 8px; right: 8px; z-index: 3;"
+            data-toggle-favorite="${r.id}"
+            aria-label="${isFav ? 'Quitar de favoritos' : 'Añadir a favoritos'} ${escapeHtml(r.name)}"
+          >
+            ${isFav ? '★' : '☆'}
+          </button>
+          <img src="${resolveImagePath(r.image_url)}" alt="${escapeHtml(r.name)}" loading="lazy" referrerpolicy="no-referrer" onerror="this.onerror=null;this.src='assets/img/verduras.jpg';" />
+          <div style="position: absolute; bottom: 8px; left: 8px; z-index: 3;">
+            ${item.canCookNow
+              ? `<span class="fridge-badge is-full">🟢 100% ¡Cocínala ya!</span>`
+              : `<span class="fridge-badge is-partial">🟡 ${item.matchPercentage}% de ingredientes</span>`
+            }
+          </div>
+        </div>
+
+        <div class="recipe-card-body" style="flex: 1;">
+          <p class="recipe-card-kicker tabular-nums">
+            ★ ${r.rating || 4.8} · ${r.difficulty || 'Fácil'} · ${r.prep_minutes} min · ${r.kcal} kcal
+          </p>
+          <h3 class="recipe-card-title">${escapeHtml(r.name)}</h3>
+          <p class="slot-meta-line" style="font-size: 0.76rem; color: var(--text-muted); margin-bottom: 0.45rem;">
+            🏛️ Fuente: ${escapeHtml(r.source_name || 'Fundación Dieta Mediterránea')}
+          </p>
+
+          <div style="margin-top: 0.5rem; margin-bottom: 0.5rem;">
+            ${matchedPills}
+            ${missingPills}
+          </div>
+
+          <p class="recipe-card-tip">${escapeHtml(r.chef_tip)}</p>
+        </div>
+
+        <div class="recipe-card-footer" style="display: flex; flex-direction: column; gap: 0.45rem;">
+          <button
+            type="button"
+            class="btn-primary"
+            style="width: 100%;"
+            data-open-recipe="${r.id}"
+          >
+            Ver Ficha y Elaboración
+          </button>
+          <button
+            type="button"
+            class="btn-secondary"
+            style="width: 100%; font-size: 0.78rem;"
+            data-slot-fridge-recipe="${r.id}"
+          >
+            📅 Añadir a mi Menú Semanal
+          </button>
+        </div>
+      </article>
+    `;
+  }).join('');
+}
+
+/**
+ * Abre el modal para colocar una receta recomendada de la nevera en el plan semanal.
+ */
+function openFridgeSlotModal(recipeId) {
+  const modal = document.getElementById('fridge-slot-modal');
+  const bodyEl = document.getElementById('fridge-slot-modal-body');
+  const subTitleEl = document.getElementById('fridge-slot-modal-subtitle');
+  if (!modal || !bodyEl) return;
+
+  const recipe = RECIPES_DB.find(r => r.id === Number(recipeId));
+  if (!recipe) return;
+
+  state.slottingFridgeRecipeId = recipe.id;
+
+  if (subTitleEl) {
+    subTitleEl.textContent = `Selecciona en qué día y momento deseas colocar "${recipe.name}".`;
+  }
+
+  const byId = new Map(RECIPES_DB.map(r => [r.id, r]));
+
+  const slotsHTML = DAYS_ORDER.map(day => {
+    const currentLunchId = state.planMap[day]?.comida;
+    const currentDinnerId = state.planMap[day]?.cena;
+    const lunchRecipe = byId.get(Number(currentLunchId));
+    const dinnerRecipe = byId.get(Number(currentDinnerId));
+
+    const isLunchAllowed = recipe.meal_slot === 'both' || recipe.meal_slot === 'lunch';
+    const isDinnerAllowed = recipe.meal_slot === 'both' || recipe.meal_slot === 'dinner';
+
+    return `
+      <div style="background: var(--bg-surface); border: 1px solid var(--border-hairline); border-radius: var(--radius-sm); padding: 0.75rem 0.9rem;">
+        <div style="font-weight: 700; color: var(--accent-primary); margin-bottom: 0.5rem; font-size: 0.9rem;">${DAY_LABELS[day]}</div>
+        <div style="display: flex; flex-direction: column; gap: 0.5rem;">
+          <div style="display: flex; align-items: center; justify-content: space-between; gap: 0.5rem;">
+            <div style="font-size: 0.82rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1;">
+              <span class="slot-meta-line">Comida:</span> <strong>${escapeHtml(lunchRecipe?.name || 'Vacío')}</strong>
+            </div>
+            ${isLunchAllowed ? `
+              <button
+                type="button"
+                class="btn-secondary"
+                style="padding: 0.25rem 0.55rem; font-size: 0.78rem;"
+                data-confirm-fridge-slot="true"
+                data-day="${day}"
+                data-meal="comida"
+              >
+                Asignar comida
+              </button>
+            ` : `<span class="slot-meta-line" style="font-size: 0.72rem;">No apto comida</span>`}
+          </div>
+
+          <div style="display: flex; align-items: center; justify-content: space-between; gap: 0.5rem;">
+            <div style="font-size: 0.82rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1;">
+              <span class="slot-meta-line">Cena:</span> <strong>${escapeHtml(dinnerRecipe?.name || 'Vacío')}</strong>
+            </div>
+            ${isDinnerAllowed ? `
+              <button
+                type="button"
+                class="btn-secondary"
+                style="padding: 0.25rem 0.55rem; font-size: 0.78rem;"
+                data-confirm-fridge-slot="true"
+                data-day="${day}"
+                data-meal="cena"
+              >
+                Asignar cena
+              </button>
+            ` : `<span class="slot-meta-line" style="font-size: 0.72rem;">No apto cena</span>`}
+          </div>
+        </div>
+      </div>
+    `;
+  }).join('');
+
+  bodyEl.innerHTML = `
+    <div style="display: flex; flex-direction: column; gap: 0.65rem; max-height: 65vh; overflow-y: auto;">
+      <p class="slot-meta-line">
+        Plato seleccionado: <strong>${escapeHtml(recipe.name)}</strong> (${recipe.kcal} kcal · ${recipe.prep_minutes} min).
+      </p>
+      <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 0.65rem;">
+        ${slotsHTML}
+      </div>
+    </div>
+  `;
+
+  modal.classList.add('is-open');
+}
+
+/**
+ * Confirma y aplica la receta de la nevera al plan semanal.
+ */
+async function handleConfirmFridgeSlot(day, mealType, recipeId) {
+  const modal = document.getElementById('fridge-slot-modal');
+  if (modal) modal.classList.remove('is-open');
+
+  const recipe = RECIPES_DB.find(r => r.id === Number(recipeId));
+  if (!recipe) return;
+
+  if (!state.planMap[day]) {
+    state.planMap[day] = {};
+  }
+  state.planMap[day][mealType] = Number(recipe.id);
+  savePlanToStorage();
+
+  await apiFetch('api/swap_recipe.php', {
+    method: 'POST',
+    body: JSON.stringify({
+      day,
+      meal_type: mealType,
+      new_recipe_id: recipe.id
+    })
+  });
+
+  renderAll();
+  showToast(`¡"${recipe.name}" asignado con éxito a ${DAY_LABELS[day]} (${mealType})!`);
 }
 
 /**
@@ -2829,11 +3176,120 @@ function setupEventListeners() {
       return;
     }
 
-    // 21. Cerrar modales al pulsar botón cerrar o fondo oscuro
+    // 21. Eventos del Buscador de la Nevera
+    const fridgeToggleChip = target.closest('[data-toggle-fridge-id]');
+    if (fridgeToggleChip) {
+      const id = Number(fridgeToggleChip.getAttribute('data-toggle-fridge-id'));
+      if (id > 0) {
+        if (state.fridgeIngredients.has(id)) {
+          state.fridgeIngredients.delete(id);
+        } else {
+          state.fridgeIngredients.add(id);
+        }
+        saveFridgeIngredients();
+        renderFridgeView();
+      }
+      return;
+    }
+
+    const removeFridgeTagBtn = target.closest('[data-remove-fridge-id]');
+    if (removeFridgeTagBtn) {
+      const id = Number(removeFridgeTagBtn.getAttribute('data-remove-fridge-id'));
+      if (id > 0) {
+        state.fridgeIngredients.delete(id);
+        saveFridgeIngredients();
+        renderFridgeView();
+      }
+      return;
+    }
+
+    if (target.closest('#fridge-clear-all-btn')) {
+      state.fridgeIngredients.clear();
+      saveFridgeIngredients();
+      renderFridgeView();
+      showToast('Nevera vaciada. Selecciona ingredientes para ver recetas.');
+      return;
+    }
+
+    if (target.closest('#fridge-add-input-btn')) {
+      const inputEl = document.getElementById('fridge-ingredient-search-input');
+      if (inputEl && inputEl.value.trim()) {
+        const val = inputEl.value.trim().toLowerCase();
+        const found = INGREDIENTS_DB.find(i => i.name.toLowerCase() === val || i.name.toLowerCase().includes(val));
+        if (found) {
+          state.fridgeIngredients.add(found.id);
+          saveFridgeIngredients();
+          inputEl.value = '';
+          renderFridgeView();
+          showToast(`Añadido "${found.name}" a tu nevera.`);
+        } else {
+          showToast(`No se encontró el ingrediente "${inputEl.value.trim()}".`);
+        }
+      }
+      return;
+    }
+
+    const slotFridgeBtn = target.closest('[data-slot-fridge-recipe]');
+    if (slotFridgeBtn) {
+      const rid = Number(slotFridgeBtn.getAttribute('data-slot-fridge-recipe'));
+      if (rid > 0) {
+        openFridgeSlotModal(rid);
+      }
+      return;
+    }
+
+    const confirmSlotBtn = target.closest('[data-confirm-fridge-slot]');
+    if (confirmSlotBtn) {
+      const day = confirmSlotBtn.getAttribute('data-day');
+      const meal = confirmSlotBtn.getAttribute('data-meal');
+      const rid = state.slottingFridgeRecipeId;
+      if (day && meal && rid) {
+        handleConfirmFridgeSlot(day, meal, rid);
+      }
+      return;
+    }
+
+    // 22. Cerrar modales al pulsar botón cerrar o fondo oscuro
     if (target.closest('[data-close-modal]') || target.classList.contains('modal-backdrop')) {
       closeAllModals();
     }
   });
+
+  // Filtros y buscador del módulo Nevera
+  const fridgeIgnorePantryCb = document.getElementById('fridge-ignore-pantry-checkbox');
+  if (fridgeIgnorePantryCb) {
+    fridgeIgnorePantryCb.addEventListener('change', e => {
+      state.fridgeIgnorePantry = e.target.checked;
+      renderFridgeView();
+    });
+  }
+
+  const fridgeSlotFilter = document.getElementById('fridge-slot-filter');
+  if (fridgeSlotFilter) {
+    fridgeSlotFilter.addEventListener('change', e => {
+      state.fridgeMealSlotFilter = e.target.value;
+      renderFridgeView();
+    });
+  }
+
+  const fridgeSeasonFilter = document.getElementById('fridge-season-filter');
+  if (fridgeSeasonFilter) {
+    fridgeSeasonFilter.addEventListener('change', e => {
+      state.fridgeSeasonFilter = e.target.value;
+      renderFridgeView();
+    });
+  }
+
+  const fridgeSearchInput = document.getElementById('fridge-ingredient-search-input');
+  if (fridgeSearchInput) {
+    fridgeSearchInput.addEventListener('keydown', e => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        const addBtn = document.getElementById('fridge-add-input-btn');
+        if (addBtn) addBtn.click();
+      }
+    });
+  }
 
   // Buscador en vivo del Recetario (200 recetas)
   const searchInput = document.getElementById('catalog-search-input');

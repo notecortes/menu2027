@@ -31,6 +31,9 @@
           <button type="button" class="nav-link" data-nav-view="catalog">
             Recetario (200)
           </button>
+          <button type="button" class="nav-link" data-nav-view="fridge">
+            🧊 En mi Nevera
+          </button>
           <button type="button" class="nav-link" data-nav-view="shopping">
             Lista de la Compra
           </button>
@@ -95,6 +98,9 @@
             <strong>Distribución activa:</strong> Arroz a la cubana (Viernes) · Legumbres (Martes, Jueves) · Pescado (Martes, Jueves) · 0 repeticiones semanales
           </div>
           <div class="utility-actions-group">
+            <button type="button" class="btn-primary" data-nav-view="fridge" style="background: var(--accent-primary);" title="Buscar recetas con los ingredientes que tienes en tu nevera">
+              🧊 ¿Qué tengo en la nevera?
+            </button>
             <button type="button" class="btn-secondary" id="open-preferences-btn">
               Configurar Días y Gustos
             </button>
@@ -191,6 +197,93 @@
       </section>
 
       <!-- ==================================================================
+           VISTA: ¿QUÉ TENGO EN LA NEVERA? (BUSCADOR DE APROVECHAMIENTO)
+           ================================================================== -->
+      <section id="view-fridge" class="view-section" aria-label="Buscador por ingredientes de la nevera">
+        <div class="section-toolbar" style="flex-direction: column; align-items: flex-start; gap: 0.75rem;">
+          <div>
+            <h2 class="aisle-title" style="font-size: 1.35rem; margin-bottom: 0.25rem;">🧊 Buscador de Aprovechamiento: ¿Qué tengo en la nevera?</h2>
+            <p class="slot-meta-line">
+              Selecciona o escribe los ingredientes que tienes en casa y descubre al instante qué recetas mediterráneas puedes cocinar hoy de inmediato o con los mínimos ingredientes faltantes.
+            </p>
+          </div>
+        </div>
+
+        <div class="fridge-quick-panel">
+          <div class="fridge-group-title">1. Selecciona ingredientes rápidos que tengas en casa:</div>
+          
+          <div class="slot-meta-line" style="margin-bottom: 0.35rem; font-weight: 600;">Proteínas y Huevos:</div>
+          <div class="fridge-chips-wrap" id="fridge-protein-chips"></div>
+
+          <div class="slot-meta-line" style="margin-bottom: 0.35rem; font-weight: 600;">Verduras y Huerta:</div>
+          <div class="fridge-chips-wrap" id="fridge-veggie-chips"></div>
+
+          <div class="slot-meta-line" style="margin-bottom: 0.35rem; font-weight: 600;">Legumbres y Arroces:</div>
+          <div class="fridge-chips-wrap" id="fridge-grain-chips"></div>
+
+          <div style="margin-top: 1rem;">
+            <label for="fridge-ingredient-search-input" class="fridge-group-title" style="display: block;">
+              2. O busca cualquier otro ingrediente del catálogo:
+            </label>
+            <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
+              <input
+                type="search"
+                id="fridge-ingredient-search-input"
+                class="search-input"
+                style="flex: 1; min-width: 250px;"
+                placeholder="Escribe calabaza, salmón, alcachofas, espárragos, pavo..."
+                list="fridge-ingredients-datalist"
+              />
+              <datalist id="fridge-ingredients-datalist"></datalist>
+              <button type="button" class="btn-secondary" id="fridge-add-input-btn">
+                + Añadir a mi nevera
+              </button>
+            </div>
+          </div>
+
+          <div class="fridge-selected-bar" id="fridge-selected-container">
+            <span class="slot-meta-line" style="font-weight: 700; color: var(--accent-primary);">En tu nevera:</span>
+            <div id="fridge-selected-tags" style="display: flex; flex-wrap: wrap; gap: 0.4rem; align-items: center;"></div>
+            <button type="button" class="btn-secondary" id="fridge-clear-all-btn" style="padding: 0.25rem 0.6rem; font-size: 0.78rem; margin-left: auto;">
+              Limpiar nevera
+            </button>
+          </div>
+
+          <div class="sort-bar" style="margin-top: 1rem; border-top: 1px solid var(--border-hairline); padding-top: 0.85rem; justify-content: space-between; flex-wrap: wrap; gap: 0.75rem;">
+            <label style="display: inline-flex; align-items: center; gap: 0.45rem; font-size: 0.85rem; cursor: pointer;">
+              <input type="checkbox" id="fridge-ignore-pantry-checkbox" checked />
+              <span>Contar con básicos de despensa (AOVE, ajo, pimentón, caldo)</span>
+            </label>
+
+            <div style="display: flex; align-items: center; gap: 0.65rem; flex-wrap: wrap;">
+              <label for="fridge-slot-filter" class="slot-meta-line"><strong>Momento:</strong></label>
+              <select id="fridge-slot-filter" class="search-input" style="padding: 0.3rem 0.6rem; font-size: 0.85rem;">
+                <option value="all">Todas las tomas</option>
+                <option value="lunch">Comidas (mediodía)</option>
+                <option value="dinner">Cenas ligeras</option>
+              </select>
+
+              <label for="fridge-season-filter" class="slot-meta-line"><strong>Temporada:</strong></label>
+              <select id="fridge-season-filter" class="search-input" style="padding: 0.3rem 0.6rem; font-size: 0.85rem;">
+                <option value="all">Cualquier temporada</option>
+                <option value="primavera">Primavera</option>
+                <option value="verano">Verano</option>
+                <option value="otono">Otoño</option>
+                <option value="invierno">Invierno</option>
+              </select>
+            </div>
+          </div>
+        </div>
+
+        <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.85rem; flex-wrap: wrap; gap: 0.5rem;">
+          <h3 class="aisle-title" id="fridge-results-title">Recetas recomendadas según tu nevera</h3>
+          <span class="slot-meta-line tabular-nums" id="fridge-results-count">Calculando...</span>
+        </div>
+
+        <div class="catalog-grid" id="fridge-results-grid"></div>
+      </section>
+
+      <!-- ==================================================================
            VISTA 3: LISTA DE LA COMPRA EXACTA, COMPACTA Y AGRUPADA
            ================================================================== -->
       <section id="view-shopping" class="view-section" aria-label="Lista de la compra semanal">
@@ -266,6 +359,9 @@
       </button>
       <button type="button" class="mobile-nav-btn" data-nav-view="catalog">
         <span>Recetario</span>
+      </button>
+      <button type="button" class="mobile-nav-btn" data-nav-view="fridge">
+        <span>🧊 Nevera</span>
       </button>
       <button type="button" class="mobile-nav-btn" data-nav-view="shopping">
         <span>Compra</span>
@@ -462,6 +558,22 @@
           </button>
         </header>
         <div class="modal-body" id="clinical-modal-body"></div>
+      </div>
+    </div>
+
+    <!-- MODAL SELECTOR DE DÍA PARA RECETA DE LA NEVERA -->
+    <div class="modal-backdrop" id="fridge-slot-modal" role="dialog" aria-modal="true" aria-labelledby="fridge-slot-modal-title">
+      <div class="modal-dialog">
+        <header class="modal-header">
+          <div>
+            <h2 class="modal-title" id="fridge-slot-modal-title">Añadir Receta a tu Menú Semanal</h2>
+            <p class="slot-meta-line" id="fridge-slot-modal-subtitle">Selecciona en qué día y momento deseas programar este plato.</p>
+          </div>
+          <button type="button" class="btn-secondary" data-close-modal="true" aria-label="Cerrar asignación de día">
+            Cerrar
+          </button>
+        </header>
+        <div class="modal-body" id="fridge-slot-modal-body"></div>
       </div>
     </div>
 
