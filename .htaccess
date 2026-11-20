@@ -1,6 +1,6 @@
 # ==============================================================================
 # MedDiet Pro — Configuración de Servidor Apache (.htaccess)
-# Compatible con Servidores Compartidos (cPanel, Plesk, Hostinger, Raiola) y Docker
+# Compatible con Servidores Compartidos (cPanel, Plesk, Hostinger, Raiola, LiteSpeed) y Docker
 # ==============================================================================
 
 # Evitar listado de directorios
@@ -15,7 +15,7 @@ DirectoryIndex index.php index.html
 # ------------------------------------------------------------------------------
 # 1. Seguridad: Denegar acceso directo a archivos sensibles de configuración, SQL y Docker
 # ------------------------------------------------------------------------------
-<FilesMatch "(^\.env|^\.git|docker-compose\.ya?ml|Dockerfile.*|.*\.sql|.*\.sh|htaccess\.conf|db\.local\.php)$">
+<FilesMatch "(^\.env|^\.git|docker-compose\.ya?ml|Dockerfile.*|.*\.sql|.*\.sh|htaccess\.conf|db\.local\.php|composer\.(json|lock)|package(-lock)?\.json|\.md|\.cnf)$">
   <IfModule mod_authz_core.c>
     Require all denied
   </IfModule>
@@ -26,13 +26,24 @@ DirectoryIndex index.php index.html
 </FilesMatch>
 
 # ------------------------------------------------------------------------------
-# 2. Motor de Reescritura (mod_rewrite)
+# 2. Seguridad: Cabeceras HTTP de protección global
+# ------------------------------------------------------------------------------
+<IfModule mod_headers.c>
+  Header always set X-Content-Type-Options "nosniff"
+  Header always set X-Frame-Options "SAMEORIGIN"
+  Header always set Referrer-Policy "strict-origin-when-cross-origin"
+  Header always set Permissions-Policy "geolocation=(), microphone=(), camera=()"
+  Header always set X-XSS-Protection "1; mode=block"
+</IfModule>
+
+# ------------------------------------------------------------------------------
+# 3. Motor de Reescritura (mod_rewrite)
 # ------------------------------------------------------------------------------
 <IfModule mod_rewrite.c>
   RewriteEngine On
 
-  # Proteger carpetas internas de acceso web directo
-  RewriteRule ^(sql|data|config)/ - [F,L]
+  # Proteger carpetas internas de acceso web directo (403 Forbidden)
+  RewriteRule ^(sql|data|config|tests|docs)/ - [F,L]
 
   # Enrutar peticiones a la API si se invocan desde /public/
   RewriteRule ^public/api/(.*)$ api/$1 [L]
@@ -44,14 +55,14 @@ DirectoryIndex index.php index.html
 </IfModule>
 
 # ------------------------------------------------------------------------------
-# 3. Rendimiento: Compresión GZIP de texto, JSON, CSS y JS
+# 4. Rendimiento: Compresión GZIP de texto, JSON, CSS y JS
 # ------------------------------------------------------------------------------
 <IfModule mod_deflate.c>
   AddOutputFilterByType DEFLATE text/html text/plain text/xml text/css text/javascript application/javascript application/json
 </IfModule>
 
 # ------------------------------------------------------------------------------
-# 4. Rendimiento: Cabeceras de expiración y caché para assets estáticos
+# 5. Rendimiento: Cabeceras de expiración y caché para assets estáticos
 # ------------------------------------------------------------------------------
 <IfModule mod_expires.c>
   ExpiresActive On

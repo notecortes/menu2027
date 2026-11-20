@@ -42,6 +42,7 @@ assertEquals(RECIPES_DB.length, 200, 'El catálogo contiene exactamente 200 rece
 
 let allHaveSources = true;
 let allHaveSourceUrls = true;
+let noBrokenOrGenericUrls = true;
 let allHaveSteps = true;
 let allHaveAllergens = true;
 let allHaveServingTips = true;
@@ -53,6 +54,9 @@ for (const r of RECIPES_DB) {
   }
   if (!r.source_url || !r.source_url.startsWith('http')) {
     allHaveSourceUrls = false;
+  }
+  if (r.source_url.includes('dietamediterranea.com') || r.source_url.includes('alimentosdespana.es') || r.source_url.endsWith('/recetas/')) {
+    noBrokenOrGenericUrls = false;
   }
   if (!Array.isArray(r.steps) || r.steps.length < 3) {
     allHaveSteps = false;
@@ -70,6 +74,7 @@ for (const r of RECIPES_DB) {
 
 assert(allHaveSources, 'El 100% de las 200 recetas cuentan con nombre de fuente gastronómica acreditada');
 assert(allHaveSourceUrls, 'El 100% de las 200 recetas cuentan con enlace web válido (URL) a la fuente');
+assert(noBrokenOrGenericUrls, 'El 100% de los enlaces apuntan a la búsqueda directa de la receta (sin 404 ni portales genéricos)');
 assert(allHaveSteps, 'El 100% de las 200 recetas tienen elaboración detallada por pasos (mínimo 3 o 4 pasos)');
 assert(allHaveAllergens, 'El 100% de las recetas declaran información clínica de alérgenos');
 assert(allHaveServingTips, 'El 100% de las recetas incluyen sugerencias de servicio y acompañamiento');

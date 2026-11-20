@@ -46,6 +46,8 @@ try {
             r.cooking_method,
             r.image_url,
             r.youtube_url,
+            r.source_name,
+            r.source_url,
             r.chef_tip,
             r.batch_prep_tip,
             r.is_friday_fixed
@@ -78,6 +80,24 @@ try {
     foreach ($rows as $row) {
         $day = $row['day_of_week'];
         $meal = $row['meal_type'];
+
+        // Sanitización y garantía de URL funcional a la receta original
+        if (empty($row['source_url']) || str_contains((string)$row['source_url'], 'dietamediterranea.com') || str_contains((string)$row['source_url'], 'alimentosdespana.es')) {
+            $cleanTitle = trim(preg_replace('/\s*\([^)]*\)/', '', (string)$row['name']));
+            $cleanTitle = trim(preg_replace('/(sin grasa|sin fritura|ligero|ligera|medida|al natural|con fondo)/i', '', $cleanTitle));
+            $row['source_url'] = 'https://cookpad.com/es/buscar/' . rawurlencode($cleanTitle ?: (string)$row['name']);
+            if (empty($row['source_name']) || $row['source_name'] === 'Fundación Dieta Mediterránea') {
+                $catNames = [
+                    'legumbre' => 'Tradición Culinaria Española · Cuchara y Legumbres',
+                    'pescado' => 'Pescadería Tradicional Española · Pescados Saludables',
+                    'ave_carne_magra' => 'Cocina Tradicional de Corral · Aves y Carnes Magras',
+                    'verdura_huevo' => 'Huerta y Campo Mediterráneo · Verduras y Huevos',
+                    'arroz_fijo' => 'Gastronomía Tradicional Española · Directo al Paladar'
+                ];
+                $row['source_name'] = $catNames[$row['category']] ?? 'Gastronomía Tradicional Española · Directo al Paladar / Cookpad';
+            }
+        }
+
         $days[$day][$meal] = $row;
         $days[$day]['daily_kcal'] += (int)$row['kcal'];
 

@@ -18,10 +18,11 @@ try {
     $pdo = getDbConnection();
 
     if ($_SERVER['REQUEST_METHOD'] === 'GET') {
-        $day = strtolower(trim((string)($_GET['day'] ?? 'lunes')));
-        $meal = strtolower(trim((string)($_GET['meal'] ?? 'comida')));
-        $season = strtolower(trim((string)($_GET['season'] ?? 'primavera')));
-        $arrozDay = strtolower(trim((string)($_GET['arroz_day'] ?? 'viernes')));
+        $day = sanitizeDayOfWeek((string)($_GET['day'] ?? 'lunes'));
+        $meal = sanitizeMealType((string)($_GET['meal'] ?? 'comida'));
+        $season = sanitizeSeason((string)($_GET['season'] ?? 'primavera'));
+        $arrozDayRaw = strtolower(trim((string)($_GET['arroz_day'] ?? 'viernes')));
+        $arrozDay = ($arrozDayRaw === 'ninguno') ? 'ninguno' : sanitizeDayOfWeek($arrozDayRaw, 'viernes');
 
         if ($arrozDay !== 'ninguno' && $day === $arrozDay && $meal === 'comida') {
             sendJsonResponse([
@@ -61,7 +62,7 @@ try {
 
         if (($meal === 'comida' && $targetCategory === 'legumbre') || ($meal === 'cena' && $targetCategory === 'pescado')) {
             $altSql = "
-                SELECT id, slug, name, category, meal_slot, seasons, kcal, protein_g, carbs_g, fat_g, prep_minutes, cooking_method, image_url, chef_tip,
+                SELECT id, slug, name, category, meal_slot, seasons, kcal, protein_g, carbs_g, fat_g, prep_minutes, cooking_method, image_url, source_name, source_url, chef_tip,
                        FIND_IN_SET(:season, seasons) AS matches_season
                 FROM recipes
                 WHERE category = :cat AND is_friday_fixed = 0 $excludeClause
@@ -71,7 +72,7 @@ try {
             $altStmt->execute([':season' => $season, ':cat' => $targetCategory]);
         } else {
             $altSql = "
-                SELECT id, slug, name, category, meal_slot, seasons, kcal, protein_g, carbs_g, fat_g, prep_minutes, cooking_method, image_url, chef_tip,
+                SELECT id, slug, name, category, meal_slot, seasons, kcal, protein_g, carbs_g, fat_g, prep_minutes, cooking_method, image_url, source_name, source_url, chef_tip,
                        FIND_IN_SET(:season, seasons) AS matches_season
                 FROM recipes
                 WHERE category IN ('ave_carne_magra', 'verdura_huevo')
@@ -85,6 +86,14 @@ try {
         }
 
         $alternatives = $altStmt->fetchAll();
+        foreach ($alternatives as &$alt) {
+            if (empty($alt['source_url']) || str_contains((string)$alt['source_url'], 'dietamediterranea.com') || str_contains((string)$alt['source_url'], 'alimentosdespana.es')) {
+                $clean = trim(preg_replace('/\s*\([^)]*\)/', '', (string)$alt['name']));
+                $clean = trim(preg_replace('/(sin grasa|sin fritura|ligero|ligera|medida|al natural|con fondo)/i', '', $clean));
+                $alt['source_url'] = 'https://cookpad.com/es/buscar/' . rawurlencode($clean ?: (string)$alt['name']);
+            }
+        }
+        unset($alt);
 
         sendJsonResponse([
             'ok' => true,
@@ -99,15 +108,14 @@ try {
     }
 
     // POST actions
-    $rawBody = file_get_contents('php://input');
-    $input = json_decode($rawBody ?: '{}', true) ?? [];
-    $action = $input['action'] ?? 'quick_swap';
-    $season = strtolower(trim((string)($input['season'] ?? 'primavera')));
+    $input = readJsonInput();
+    $action = (string)($input['action'] ?? 'quick_swap');
+    $season = sanitizeSeason((string)($input['season'] ?? 'primavera'));
 
     if ($action === 'apply_swap') {
-        $day = strtolower(trim((string)($input['day'] ?? '')));
-        $meal = strtolower(trim((string)($input['meal'] ?? '')));
-        $newRecipeId = (int)($input['recipe_id'] ?? 0);
+        $day = sanitizeDayOfWeek((string)($input['day'] ?? 'lunes'));
+        $meal = sanitizeMealType((string)($input['meal'] ?? 'comida'));
+        $newRecipeId = max(1, (int)($input['recipe_id'] ?? 0));
 
         $upd = $pdo->prepare("UPDATE weekly_plans SET recipe_id = :rid WHERE day_of_week = :day AND meal_type = :meal");
         $upd->execute([':rid' => $newRecipeId, ':day' => $day, ':meal' => $meal]);
@@ -117,23 +125,25 @@ try {
 
     if ($action === 'sync_plan' && isset($input['plan']) && is_array($input['plan'])) {
         $upd = $pdo->prepare("UPDATE weekly_plans SET recipe_id = :rid, is_locked = :lck WHERE day_of_week = :day AND meal_type = :meal");
-        $arrozDay = strtolower(trim((string)($input['arroz_cubana_day'] ?? 'viernes')));
+        $arrozDayRaw = strtolower(trim((string)($input['arroz_cubana_day'] ?? 'viernes')));
+        $arrozDay = ($arrozDayRaw === 'ninguno') ? 'ninguno' : sanitizeDayOfWeek($arrozDayRaw, 'viernes');
         foreach ($input['plan'] as $day => $meals) {
             if (!is_array($meals)) continue;
+            $safeDay = sanitizeDayOfWeek((string)$day);
             if (isset($meals['comida'])) {
-                $isLocked = ($day === $arrozDay && $arrozDay !== 'ninguno') ? 1 : 0;
-                $upd->execute([':rid' => (int)$meals['comida'], ':lck' => $isLocked, ':day' => $day, ':meal' => 'comida']);
+                $isLocked = ($safeDay === $arrozDay && $arrozDay !== 'ninguno') ? 1 : 0;
+                $upd->execute([':rid' => (int)$meals['comida'], ':lck' => $isLocked, ':day' => $safeDay, ':meal' => 'comida']);
             }
             if (isset($meals['cena'])) {
-                $upd->execute([':rid' => (int)$meals['cena'], ':lck' => 0, ':day' => $day, ':meal' => 'cena']);
+                $upd->execute([':rid' => (int)$meals['cena'], ':lck' => 0, ':day' => $safeDay, ':meal' => 'cena']);
             }
         }
         sendJsonResponse(['ok' => true, 'message' => 'Plan semanal sincronizado en base de datos.']);
     }
 
     if ($action === 'quick_swap') {
-        $day = strtolower(trim((string)($input['day'] ?? '')));
-        $meal = strtolower(trim((string)($input['meal'] ?? '')));
+        $day = sanitizeDayOfWeek((string)($input['day'] ?? 'lunes'));
+        $meal = sanitizeMealType((string)($input['meal'] ?? 'comida'));
 
         $currStmt = $pdo->prepare("
             SELECT wp.recipe_id, r.category
@@ -251,5 +261,5 @@ try {
 
     sendJsonResponse(['ok' => false, 'error' => 'Acción no reconocida.'], 400);
 } catch (Throwable $e) {
-    sendJsonResponse(['ok' => false, 'error' => $e->getMessage()], 500);
+    handleApiException($e, 'Error al procesar el cambio de plato');
 }

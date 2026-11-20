@@ -94,5 +94,5 @@ try {
         'aisles' => $grouped
     ]);
 } catch (Throwable $e) {
-    sendJsonResponse(['ok' => false, 'error' => $e->getMessage()], 500);
+    handleApiException($e, 'Error al generar la lista de la compra');
 }

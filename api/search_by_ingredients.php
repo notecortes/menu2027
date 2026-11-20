@@ -58,6 +58,8 @@ try {
             r.cooking_method,
             r.image_url,
             r.youtube_url,
+            r.source_name,
+            r.source_url,
             r.chef_tip,
             r.batch_prep_tip,
             ri.ingredient_id,
@@ -91,6 +93,15 @@ try {
     foreach ($rows as $row) {
         $rid = (int)$row['recipe_id'];
         if (!isset($grouped[$rid])) {
+            $sourceUrl = (string)($row['source_url'] ?? '');
+            $sourceName = (string)($row['source_name'] ?? '');
+            if (empty($sourceUrl) || str_contains($sourceUrl, 'dietamediterranea.com') || str_contains($sourceUrl, 'alimentosdespana.es')) {
+                $cleanTitle = trim(preg_replace('/\s*\([^)]*\)/', '', (string)$row['recipe_name']));
+                $cleanTitle = trim(preg_replace('/(sin grasa|sin fritura|ligero|ligera|medida|al natural|con fondo)/i', '', $cleanTitle));
+                $sourceUrl = 'https://cookpad.com/es/buscar/' . rawurlencode($cleanTitle ?: (string)$row['recipe_name']);
+                $sourceName = $sourceName ?: 'Gastronomía Tradicional Española · Directo al Paladar / Cookpad';
+            }
+
             $grouped[$rid] = [
                 'id' => $rid,
                 'slug' => $row['slug'],
@@ -106,6 +117,8 @@ try {
                 'cooking_method' => $row['cooking_method'],
                 'image_url' => $row['image_url'],
                 'youtube_url' => $row['youtube_url'],
+                'source_name' => $sourceName,
+                'source_url' => $sourceUrl,
                 'chef_tip' => $row['chef_tip'],
                 'batch_prep_tip' => $row['batch_prep_tip'],
                 'ingredients' => []

@@ -1141,16 +1141,23 @@ function openRecipeDetailModal(recipeId) {
           <p class="chef-tip-text">${escapeHtml(recipe.chef_tip)}</p>
         </div>
 
-        <div class="recipe-source-badge">
-          <div>
-            <span class="slot-meta-line" style="display: block; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); font-weight: 700;">Fuente y Aval Gastronómico:</span>
-            <strong style="color: var(--text-primary); font-size: 0.88rem;">${escapeHtml(recipe.source_name || 'Fundación Dieta Mediterránea')}</strong>
+        <div class="recipe-source-badge" style="display: flex; flex-direction: column; gap: 0.5rem; align-items: flex-start;">
+          <div style="width: 100%; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.5rem;">
+            <div>
+              <span class="slot-meta-line" style="display: block; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); font-weight: 700;">Fuente y Aval Gastronómico:</span>
+              <strong style="color: var(--text-primary); font-size: 0.88rem;">${escapeHtml(recipe.source_name || 'Tradición Culinaria Española · Directo al Paladar / Cookpad')}</strong>
+            </div>
+            <div style="display: flex; gap: 0.4rem; flex-wrap: wrap;">
+              ${recipe.source_url ? `
+                <a href="${escapeHtml(recipe.source_url)}" target="_blank" rel="noopener noreferrer" class="btn-secondary" style="font-size: 0.78rem; padding: 0.35rem 0.65rem;" title="Consultar recetas de ${escapeHtml(recipe.name)} en Cookpad">
+                  🥘 Ver en Cookpad ↗
+                </a>
+              ` : ''}
+              <a href="https://www.google.com/search?q=${encodeURIComponent('site:directoalpaladar.com receta ' + (recipe.name || ''))}" target="_blank" rel="noopener noreferrer" class="btn-secondary" style="font-size: 0.78rem; padding: 0.35rem 0.65rem;" title="Buscar receta de ${escapeHtml(recipe.name)} en Directo al Paladar">
+                📖 Directo al Paladar ↗
+              </a>
+            </div>
           </div>
-          ${recipe.source_url ? `
-            <a href="${recipe.source_url}" target="_blank" rel="noopener noreferrer" class="btn-secondary" style="font-size: 0.78rem; padding: 0.35rem 0.65rem;" title="Consultar receta original en ${escapeHtml(recipe.source_name)}">
-              Ver en fuente original ↗
-            </a>
-          ` : ''}
         </div>
 
         <div style="margin-top: 0.65rem; padding: 0.55rem 0.8rem; background: var(--bg-canvas); border: 1px dashed var(--border-hairline); border-radius: var(--radius-sm); font-size: 0.82rem;">
@@ -1169,12 +1176,13 @@ function openRecipeDetailModal(recipeId) {
             ${isFav ? '★ En tus Favoritas' : '☆ Guardar en Favoritas'}
           </button>
           <a
-            href="${recipe.youtube_url}"
+            href="${escapeHtml(recipe.youtube_url || ('https://www.youtube.com/results?search_query=' + encodeURIComponent('receta casera ' + (recipe.name || '') + ' tradicional')))}"
             target="_blank"
             rel="noopener noreferrer"
             class="btn-secondary"
+            title="Ver videorreceta paso a paso en YouTube"
           >
-            Ver Videorreceta
+            ▶️ Ver Videorreceta
           </a>
         </div>
       </div>
@@ -2716,12 +2724,19 @@ function capitalize(str) {
   return str.charAt(0).toUpperCase() + str.slice(1);
 }
 
+/**
+ * Escapa caracteres HTML especiales para prevenir vulnerabilidades XSS en cadenas dinámicas.
+ *
+ * @param {*} str - Cadena o valor a escapar
+ * @returns {string} Cadena sanitizada
+ */
 function escapeHtml(str) {
   return String(str ?? '')
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
 }
 
 /**

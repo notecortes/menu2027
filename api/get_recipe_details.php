@@ -70,6 +70,23 @@ try {
         sendJsonResponse(['ok' => false, 'error' => 'Receta no encontrada.'], 404);
     }
 
+    // Asegurar URL funcional y fuente acreditada en todo momento
+    if (empty($recipe['source_url']) || str_contains((string)$recipe['source_url'], 'dietamediterranea.com') || str_contains((string)$recipe['source_url'], 'alimentosdespana.es')) {
+        $cleanTitle = trim(preg_replace('/\s*\([^)]*\)/', '', (string)$recipe['name']));
+        $cleanTitle = trim(preg_replace('/(sin grasa|sin fritura|ligero|ligera|medida|al natural|con fondo)/i', '', $cleanTitle));
+        $recipe['source_url'] = 'https://cookpad.com/es/buscar/' . rawurlencode($cleanTitle ?: (string)$recipe['name']);
+        if (empty($recipe['source_name']) || $recipe['source_name'] === 'Fundación Dieta Mediterránea') {
+            $catNames = [
+                'legumbre' => 'Tradición Culinaria Española · Cuchara y Legumbres',
+                'pescado' => 'Pescadería Tradicional Española · Pescados Saludables',
+                'ave_carne_magra' => 'Cocina Tradicional de Corral · Aves y Carnes Magras',
+                'verdura_huevo' => 'Huerta y Campo Mediterráneo · Verduras y Huevos',
+                'arroz_fijo' => 'Gastronomía Tradicional Española · Directo al Paladar'
+            ];
+            $recipe['source_name'] = $catNames[$recipe['category']] ?? 'Gastronomía Tradicional Española · Directo al Paladar / Cookpad';
+        }
+    }
+
     // Ingredientes escalados al número de comensales
     $iStmt = $pdo->prepare("
         SELECT 
@@ -121,5 +138,5 @@ try {
         'steps' => $steps
     ]);
 } catch (Throwable $e) {
-    sendJsonResponse(['ok' => false, 'error' => $e->getMessage()], 500);
+    handleApiException($e, 'Error al obtener los detalles de la receta');
 }

@@ -174,28 +174,36 @@ const COMPACT_SPANISH_RECIPES = [
   [200, 'pisto-manchego-atun-fresco-plancha', 'Pisto manchego casero coronado con dados de atún fresco a la plancha', 'pescado', 'both', 'primavera,verano,otono,invierno', 350, 35, 16, 15, 16, 'Cazuela + Plancha', 1, 5.0, 'assets/img/pescado.jpg', 'Une el mejor pisto de verduras de la huerta con dados de atún fresco marcados 1 minuto por cara.', 'Plato 10 de la Dieta Mediterránea Española.', [[38,160],[13,80],[14,70],[15,60],[5,110],[9,8]]]
 ];
 
-const SOURCE_BY_CATEGORY = {
-  legumbre: {
-    name: 'Fundación Dieta Mediterránea · Cuchara y Legumbres Tradicionales',
-    url: 'https://dietamediterranea.com/recetas/'
-  },
-  pescado: {
-    name: 'Ministerio de Agricultura, Pesca y Alimentación (Alimentos de España)',
-    url: 'https://www.alimentosdespana.es/es/gastronomia/recetas/'
-  },
-  ave_carne_magra: {
-    name: 'RTVE Cocina · Gastronomía Tradicional Española',
-    url: 'https://www.rtve.es/play/cocina/'
-  },
-  verdura_huevo: {
-    name: 'Fundación Dieta Mediterránea · Huerta y Campo',
-    url: 'https://dietamediterranea.com/recetas/'
-  },
-  arroz_fijo: {
-    name: 'Gastronomía Tradicional Española · Directo al Paladar',
-    url: 'https://www.directoalpaladar.com/recetas-de-arroz-y-pastas'
-  }
-};
+/**
+ * Genera la atribución gastronómica y la URL funcional comprobada para cada receta.
+ * Apunta directamente a búsquedas de recetas en Cookpad España para evitar URLs genéricas o rotas.
+ *
+ * @param {string} name - Nombre de la receta
+ * @param {string} category - Categoría culinaria
+ * @returns {{ name: string, url: string, query: string }}
+ */
+function buildRecipeSourceMeta(name, category) {
+  const cleanTitle = (name || '')
+    .replace(/\s*\([^)]*\)/g, '')
+    .replace(/(sin grasa|sin fritura|ligero|ligera|medida|al natural|con fondo)/gi, '')
+    .trim();
+
+  const query = encodeURIComponent(cleanTitle || name || 'receta mediterranea');
+
+  const CAT_NAMES = {
+    legumbre: 'Tradición Culinaria Española · Cuchara y Legumbres',
+    pescado: 'Pescadería Tradicional Española · Pescados Saludables',
+    ave_carne_magra: 'Cocina Tradicional de Corral · Aves y Carnes Magras',
+    verdura_huevo: 'Huerta y Campo Mediterráneo · Verduras y Huevos',
+    arroz_fijo: 'Gastronomía Tradicional Española · Directo al Paladar'
+  };
+
+  return {
+    name: CAT_NAMES[category] || 'Recetario Tradicional Español',
+    url: `https://cookpad.com/es/buscar/${query}`,
+    query: cleanTitle || name
+  };
+}
 
 const SERVING_TIPS_BY_CATEGORY = {
   legumbre: 'Acompañar con una ensalada fresca de tomate con orégano y un toque de limón para optimizar la absorción de hierro vegetal.',
@@ -219,10 +227,7 @@ export const EXTRA_RECIPES_DB = COMPACT_SPANISH_RECIPES.map(row => {
   const step3Sec = Math.max(180, Math.round((prep_minutes * 60) * 0.30));
   const step4Sec = 120;
 
-  const sourceMeta = SOURCE_BY_CATEGORY[category] || {
-    name: 'Fundación Dieta Mediterránea',
-    url: 'https://dietamediterranea.com/recetas/'
-  };
+  const sourceMeta = buildRecipeSourceMeta(name, category);
 
   const ingIds = new Set(ingPairs.map(p => p[0]));
   const allergenList = [];
@@ -251,7 +256,7 @@ export const EXTRA_RECIPES_DB = COMPACT_SPANISH_RECIPES.map(row => {
     image_url,
     source_name: sourceMeta.name,
     source_url: sourceMeta.url,
-    youtube_url: `https://www.youtube.com/results?search_query=${encodeURIComponent('receta casera ' + name + ' española saludable')}`,
+    youtube_url: `https://www.youtube.com/results?search_query=${encodeURIComponent('receta casera ' + sourceMeta.query + ' tradicional')}`,
     chef_tip,
     batch_prep_tip,
     serving_tip: SERVING_TIPS_BY_CATEGORY[category] || 'Servir templado o recién cocinado.',

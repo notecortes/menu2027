@@ -1264,33 +1264,7 @@ export const RECIPES_DB = [
   const diffMap = { 1: 'Muy fácil', 2: 'Fácil', 3: 'Media' };
   const baseRating = r.id === 1 ? 5.0 : Number((4.7 + ((r.id * 7) % 4) * 0.1).toFixed(1));
 
-  const SOURCE_BY_CAT = {
-    legumbre: {
-      name: 'Fundación Dieta Mediterránea · Cuchara y Legumbres Tradicionales',
-      url: 'https://dietamediterranea.com/recetas/'
-    },
-    pescado: {
-      name: 'Ministerio de Agricultura, Pesca y Alimentación (Alimentos de España)',
-      url: 'https://www.alimentosdespana.es/es/gastronomia/recetas/'
-    },
-    ave_carne_magra: {
-      name: 'RTVE Cocina · Gastronomía Tradicional Española',
-      url: 'https://www.rtve.es/play/cocina/'
-    },
-    verdura_huevo: {
-      name: 'Fundación Dieta Mediterránea · Huerta y Campo',
-      url: 'https://dietamediterranea.com/recetas/'
-    },
-    arroz_fijo: {
-      name: 'Gastronomía Tradicional Española · Directo al Paladar',
-      url: 'https://www.directoalpaladar.com/recetas-de-arroz-y-pastas'
-    }
-  };
-
-  const defaultSource = SOURCE_BY_CAT[r.category] || {
-    name: 'Fundación Dieta Mediterránea',
-    url: 'https://dietamediterranea.com/recetas/'
-  };
+  const sourceMeta = buildRecipeSourceMeta(r);
 
   const ingIds = new Set((r.ingredients || []).map(item => Number(item.ingredient_id)));
   const allergenList = [];
@@ -1310,18 +1284,52 @@ export const RECIPES_DB = [
     arroz_fijo: 'Acompañar con el plátano dorado y una infusión digestiva tras la comida.'
   };
 
+  const isOldGenericUrl = !r.source_url || r.source_url.includes('dietamediterranea.com') || r.source_url.includes('alimentosdespana.es');
+  const resolvedSourceUrl = isOldGenericUrl ? sourceMeta.url : r.source_url;
+  const resolvedSourceName = (!r.source_name || r.source_name === 'Fundación Dieta Mediterránea') ? sourceMeta.name : r.source_name;
+
   return {
     ...r,
     image_url: resolveDishSpecificImage(r),
     difficulty_level: r.difficulty_level || diffLevel,
     difficulty: r.difficulty || diffMap[diffLevel],
     rating: r.rating || Math.min(5.0, baseRating),
-    source_name: r.source_name || defaultSource.name,
-    source_url: r.source_url || defaultSource.url,
+    source_name: resolvedSourceName,
+    source_url: resolvedSourceUrl,
     serving_tip: r.serving_tip || SERVING_TIPS[r.category] || 'Servir templado o recién cocinado.',
     allergens: r.allergens || allergensText
   };
 });
+
+/**
+ * Genera la atribución gastronómica y la URL funcional para cada receta.
+ * Dirige a búsquedas directas de la receta comprobadas para evitar enlaces rotos o genéricos.
+ *
+ * @param {Object} r - Receta
+ * @returns {{ name: string, url: string, query: string }}
+ */
+export function buildRecipeSourceMeta(r) {
+  const cleanTitle = (r.name || '')
+    .replace(/\s*\([^)]*\)/g, '')
+    .replace(/(sin grasa|sin fritura|ligero|ligera|medida|al natural|con fondo)/gi, '')
+    .trim();
+
+  const query = encodeURIComponent(cleanTitle || r.name || 'receta mediterranea');
+
+  const CAT_NAMES = {
+    legumbre: 'Tradición Culinaria Española · Cuchara y Legumbres',
+    pescado: 'Pescadería Tradicional Española · Pescados Saludables',
+    ave_carne_magra: 'Cocina Tradicional de Corral · Aves y Carnes Magras',
+    verdura_huevo: 'Huerta y Campo Mediterráneo · Verduras y Huevos',
+    arroz_fijo: 'Gastronomía Tradicional Española · Directo al Paladar'
+  };
+
+  return {
+    name: CAT_NAMES[r.category] || 'Recetario Tradicional Español',
+    url: `https://cookpad.com/es/buscar/${query}`,
+    query: cleanTitle || r.name
+  };
+}
 
 export function resolveDishSpecificImage(r) {
   const txt = `${r.name || ''} ${r.slug || ''} ${r.cooking_method || ''}`.toLowerCase();
